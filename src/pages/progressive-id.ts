@@ -17,7 +17,7 @@ const MIN_NOTES = 2;
 const MAX_NOTES = 10;
 const WRONG_ANSWER_DELAY = 1000; // ms to show wrong answer before continuing
 const CORRECT_FLASH_DELAY = 300; // ms to show green flash on correct answer
-const INPUT_DELAY = 1000; // ms to wait before accepting input after note plays
+const NOTE_DURATION = 0.8; // seconds
 
 interface ExerciseState {
   // Current set of notes (indices into OCTAVE_4_NOTES)
@@ -202,14 +202,12 @@ function checkDifficultyAdjustment(): void {
   }
 }
 
-function advanceToNextNote(): void {
+async function advanceToNextNote(): Promise<void> {
   pickNextNote();
   state.inputEnabled = false;
   render();
-  playCurrentNote();
-  setTimeout(() => {
-    state.inputEnabled = true;
-  }, INPUT_DELAY);
+  await playCurrentNote();
+  state.inputEnabled = true;
 }
 
 function handleAnswer(chosenIdx: number): void {
@@ -227,6 +225,11 @@ function handleAnswer(chosenIdx: number): void {
   if (state.wasCorrect) {
     state.streak++;
     state.totalCorrect++;
+    // Clear new note highlight if it was correctly identified
+    const chosenNoteIdx = state.noteIndices[chosenIdx];
+    if (chosenNoteIdx === state.newNoteIdx) {
+      state.newNoteIdx = null;
+    }
   } else {
     state.streak = 0;
   }
@@ -247,8 +250,8 @@ function handleAnswer(chosenIdx: number): void {
   }
 }
 
-function playCurrentNote(): void {
-  playNote(getCurrentNote(), { duration: 0.8 });
+async function playCurrentNote(): Promise<void> {
+  await playNote(getCurrentNote(), { duration: NOTE_DURATION });
 }
 
 function render(): void {
@@ -402,11 +405,9 @@ function setupEventListeners(): void {
   window.addEventListener("hashchange", cleanupOnNavigate);
 }
 
-export function renderProgressiveId(): void {
+export async function renderProgressiveId(): Promise<void> {
   initExercise();
   render();
-  playCurrentNote();
-  setTimeout(() => {
-    state.inputEnabled = true;
-  }, INPUT_DELAY);
+  await playCurrentNote();
+  state.inputEnabled = true;
 }

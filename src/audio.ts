@@ -67,11 +67,12 @@ export interface PlayOptions {
 
 /**
  * Play a pure tone at the specified frequency.
+ * Returns a Promise that resolves when playback completes.
  */
 export function playFrequency(
   frequency: number,
   options: PlayOptions = {}
-): void {
+): Promise<void> {
   const { duration = 0.5, volume = 0.3 } = options;
   const ctx = getAudioContext();
 
@@ -93,17 +94,22 @@ export function playFrequency(
 
   oscillator.start(now);
   oscillator.stop(now + duration);
+
+  return new Promise((resolve) => {
+    oscillator.onended = () => resolve();
+  });
 }
 
 /**
  * Play a note by name (e.g., "A4", "C#4").
+ * Returns a Promise that resolves when playback completes.
  */
-export function playNote(note: string, options: PlayOptions = {}): void {
+export function playNote(note: string, options: PlayOptions = {}): Promise<void> {
   const frequency = NOTE_FREQUENCIES[note];
   if (frequency === undefined) {
     throw new Error(`Unknown note: ${note}`);
   }
-  playFrequency(frequency, options);
+  return playFrequency(frequency, options);
 }
 
 /**
