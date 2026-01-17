@@ -17,6 +17,7 @@ const MIN_NOTES = 2;
 const MAX_NOTES = 10;
 const WRONG_ANSWER_DELAY = 1000; // ms to show wrong answer before continuing
 const CORRECT_FLASH_DELAY = 300; // ms to show green flash on correct answer
+const INPUT_DELAY = 1000; // ms to wait before accepting input after note plays
 
 interface ExerciseState {
   // Current set of notes (indices into OCTAVE_4_NOTES)
@@ -36,6 +37,10 @@ interface ExerciseState {
   // Total stats
   totalCorrect: number;
   totalAttempts: number;
+  // Most recently added note (to highlight as new)
+  newNoteIdx: number | null;
+  // Whether input is currently accepted
+  inputEnabled: boolean;
 }
 
 let state: ExerciseState;
@@ -112,13 +117,23 @@ function initExercise(): void {
     chosenIdx: null,
     totalCorrect: 0,
     totalAttempts: 0,
+    newNoteIdx: null,
+    inputEnabled: false,
   };
 
   pickNextNote();
 }
 
 function pickNextNote(): void {
-  state.currentNoteIdx = Math.floor(Math.random() * state.noteIndices.length);
+  const previousIdx = state.currentNoteIdx;
+
+  // Pick a random note, but re-roll once if it's the same as last time
+  let newIdx = Math.floor(Math.random() * state.noteIndices.length);
+  if (newIdx === previousIdx && state.noteIndices.length > 1) {
+    newIdx = Math.floor(Math.random() * state.noteIndices.length);
+  }
+
+  state.currentNoteIdx = newIdx;
   state.hasAnswered = false;
   state.wasCorrect = null;
   state.chosenIdx = null;
@@ -138,6 +153,7 @@ function increaseDifficulty(): void {
     if (newNote !== -1) {
       state.noteIndices.push(newNote);
       state.noteIndices.sort((a, b) => a - b);
+      state.newNoteIdx = newNote;
     }
   } else {
     // At max, swap out a random non-C4 note
@@ -150,6 +166,7 @@ function increaseDifficulty(): void {
       if (newNote !== -1) {
         state.noteIndices.push(newNote);
         state.noteIndices.sort((a, b) => a - b);
+        state.newNoteIdx = newNote;
       }
     }
   }
@@ -187,13 +204,17 @@ function checkDifficultyAdjustment(): void {
 
 function advanceToNextNote(): void {
   pickNextNote();
+  state.inputEnabled = false;
   render();
   playCurrentNote();
+  setTimeout(() => {
+    state.inputEnabled = true;
+  }, INPUT_DELAY);
 }
 
 function handleAnswer(chosenIdx: number): void {
-  if (state.hasAnswered) {
-    return; // Already answered, waiting for auto-advance
+  if (state.hasAnswered || !state.inputEnabled) {
+    return; // Already answered or input not yet enabled
   }
 
   if (chosenIdx < 0 || chosenIdx >= state.noteIndices.length) return;
@@ -289,6 +310,12 @@ function renderNoteButtons(): void {
     button.className = "progressive-note-btn";
     button.textContent = note;
 
+    // Highlight new note
+    const noteIdx = state.noteIndices[index];
+    if (noteIdx === state.newNoteIdx) {
+      button.classList.add("new-note");
+    }
+
     if (state.hasAnswered) {
       if (index === state.currentNoteIdx) {
         button.classList.add("correct");
@@ -379,4 +406,7 @@ export function renderProgressiveId(): void {
   initExercise();
   render();
   playCurrentNote();
+  setTimeout(() => {
+    state.inputEnabled = true;
+  }, INPUT_DELAY);
 }
