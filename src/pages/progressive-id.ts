@@ -16,6 +16,7 @@ const FAILURE_THRESHOLD = 0.5;
 const MIN_NOTES = 2;
 const MAX_NOTES = 10;
 const WRONG_ANSWER_DELAY = 1000; // ms to show wrong answer before continuing
+const CORRECT_FLASH_DELAY = 300; // ms to show green flash on correct answer
 
 interface ExerciseState {
   // Current set of notes (indices into OCTAVE_4_NOTES)
@@ -217,9 +218,9 @@ function handleAnswer(chosenIdx: number): void {
   checkDifficultyAdjustment();
   render();
 
-  // Auto-advance: immediately if correct, after delay if wrong
+  // Auto-advance: brief flash if correct, longer delay if wrong
   if (state.wasCorrect) {
-    advanceToNextNote();
+    setTimeout(advanceToNextNote, CORRECT_FLASH_DELAY);
   } else {
     setTimeout(advanceToNextNote, WRONG_ANSWER_DELAY);
   }
@@ -251,11 +252,15 @@ function render(): void {
       <div id="feedback"></div>
 
       <div class="stats-row">
-        <div class="stats">
-          <span class="stats-label">Score:</span>
-          <span>${state.totalCorrect} / ${state.totalAttempts}</span>
+        <div class="stats correct-stat">
+          <span class="stats-label">Right:</span>
+          <span>${state.totalCorrect}</span>
         </div>
-        <div class="stats">
+        <div class="stats wrong-stat">
+          <span class="stats-label">Wrong:</span>
+          <span>${state.totalAttempts - state.totalCorrect}</span>
+        </div>
+        <div class="stats streak-stat">
           <span class="stats-label">Streak:</span>
           <span>${state.streak}${state.streak >= 5 ? " 🔥" : ""}</span>
         </div>
