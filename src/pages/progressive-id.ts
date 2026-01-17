@@ -15,6 +15,7 @@ const WINDOW_SIZE = 10;
 const FAILURE_THRESHOLD = 0.5;
 const MIN_NOTES = 2;
 const MAX_NOTES = 10;
+const WRONG_ANSWER_DELAY = 1000; // ms to show wrong answer before continuing
 
 interface ExerciseState {
   // Current set of notes (indices into OCTAVE_4_NOTES)
@@ -55,8 +56,8 @@ function minDistanceToSet(noteIdx: number, setIndices: number[]): number {
 }
 
 /**
- * Select a note that is well-differentiated from existing notes.
- * Prefers notes that maximize minimum distance to existing notes.
+ * Select a note that tends toward being well-differentiated from existing notes,
+ * but with randomization. Uses distance-squared as weights for selection.
  */
 function selectDifferentiatedNote(existingIndices: number[]): number {
   const available: number[] = [];
@@ -69,17 +70,28 @@ function selectDifferentiatedNote(existingIndices: number[]): number {
   if (available.length === 0) return -1;
 
   // Score each available note by its minimum distance to existing notes
-  const scored = available.map((idx) => ({
-    idx,
-    distance: minDistanceToSet(idx, existingIndices),
-  }));
+  // Use distance squared as weight to prefer distant notes but allow randomness
+  const scored = available.map((idx) => {
+    const distance = minDistanceToSet(idx, existingIndices);
+    return {
+      idx,
+      weight: distance * distance, // Square to bias toward more distant notes
+    };
+  });
 
-  // Sort by distance descending, pick randomly from top candidates
-  scored.sort((a, b) => b.distance - a.distance);
-  const maxDist = scored[0].distance;
-  const topCandidates = scored.filter((s) => s.distance === maxDist);
+  // Weighted random selection
+  const totalWeight = scored.reduce((sum, s) => sum + s.weight, 0);
+  let random = Math.random() * totalWeight;
 
-  return topCandidates[Math.floor(Math.random() * topCandidates.length)].idx;
+  for (const s of scored) {
+    random -= s.weight;
+    if (random <= 0) {
+      return s.idx;
+    }
+  }
+
+  // Fallback (shouldn't happen)
+  return scored[scored.length - 1].idx;
 }
 
 /**
@@ -172,12 +184,15 @@ function checkDifficultyAdjustment(): void {
   }
 }
 
+function advanceToNextNote(): void {
+  pickNextNote();
+  render();
+  playCurrentNote();
+}
+
 function handleAnswer(chosenIdx: number): void {
   if (state.hasAnswered) {
-    pickNextNote();
-    render();
-    playCurrentNote();
-    return;
+    return; // Already answered, waiting for auto-advance
   }
 
   if (chosenIdx < 0 || chosenIdx >= state.noteIndices.length) return;
@@ -201,6 +216,13 @@ function handleAnswer(chosenIdx: number): void {
 
   checkDifficultyAdjustment();
   render();
+
+  // Auto-advance: immediately if correct, after delay if wrong
+  if (state.wasCorrect) {
+    advanceToNextNote();
+  } else {
+    setTimeout(advanceToNextNote, WRONG_ANSWER_DELAY);
+  }
 }
 
 function playCurrentNote(): void {
@@ -295,10 +317,10 @@ function renderFeedback(): void {
   const correctNote = getCurrentNote();
   if (state.wasCorrect) {
     feedback.className = "feedback success";
-    feedback.textContent = "Correct! Press Space to continue.";
+    feedback.textContent = "Correct!";
   } else {
     feedback.className = "feedback error";
-    feedback.textContent = `That was ${correctNote}. Press Space to continue.`;
+    feedback.textContent = `That was ${correctNote}.`;
   }
 }
 
@@ -313,13 +335,10 @@ function setupEventListeners(): void {
   keyboardHandler = (e: KeyboardEvent) => {
     const notes = getActiveNotes();
 
+    // Space to replay note
     if (e.key === " ") {
       e.preventDefault();
-      if (state.hasAnswered) {
-        pickNextNote();
-        render();
-        playCurrentNote();
-      } else {
+      if (!state.hasAnswered) {
         playCurrentNote();
       }
       return;
