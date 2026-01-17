@@ -24,6 +24,17 @@ fi
 # Set Claude config directory
 export CLAUDE_CONFIG_DIR="$HOME/.claude"
 
+# Install Claude Code if not present
+# We install here (not in Dockerfile) because /home/dev is a volume mount
+# and would shadow any files installed during build
+CLAUDE_INSTALL_MARKER="$HOME/.claude-installed"
+if [ ! -f "$CLAUDE_INSTALL_MARKER" ] || [ ! -x "$HOME/.claude/bin/claude" ]; then
+    echo "Installing Claude Code..."
+    curl -fsSL https://claude.ai/install.sh | bash
+    touch "$CLAUDE_INSTALL_MARKER"
+    echo "Claude Code installed successfully"
+fi
+
 # Copy Claude credentials from host if not present in container
 # Claude Code needs:
 # 1. OAuth tokens in ~/.claude/.credentials.json

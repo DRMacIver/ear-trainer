@@ -1,12 +1,12 @@
 {
   "name": "ear-trainer",
   "version": "0.1.0",
-  "description": "",
+  "description": "Ear training exercises for developing perfect pitch",
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc",
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage",
@@ -15,13 +15,16 @@
     "format": "prettier --write ."
   },
   "devDependencies": {
+    "@eslint/js": "^9",
     "@types/node": "^20",
     "@vitest/coverage-v8": "^1",
     "eslint": "^9",
+    "globals": "^15",
     "prettier": "^3",
     "typescript": "^5",
     "vitest": "^1",
-    "@typescript-eslint/eslint-plugin": "^7",
-    "@typescript-eslint/parser": "^7"
+    "@typescript-eslint/eslint-plugin": "^8",
+    "@typescript-eslint/parser": "^8",
+    "vite": "^5"
   }
 }

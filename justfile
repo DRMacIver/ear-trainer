@@ -1,15 +1,12 @@
 # List available commands
+# Docker image name
+# Install dependencies
+
 default:
 	@just --list
 
-# Docker image name
 DOCKER_IMAGE := "ear-trainer-dev"
 
-# Validate devcontainer configuration files exist
-validate-devcontainer:
-	@test -f .devcontainer/devcontainer.json && test -f .devcontainer/Dockerfile && echo "Devcontainer configuration valid"
-
-# Build Docker image if Dockerfile changed
 _docker-build:
 	#!/usr/bin/env bash
 	set -e
@@ -25,7 +22,14 @@ _docker-build:
 		echo "$HASH" > "$SENTINEL"
 	fi
 
-# Start development container and run claude (or custom command if args provided)
+build:
+	npm run build
+
+check: lint test
+
+clean:
+	rm -rf dist/ node_modules/.cache/ coverage/
+
 develop *ARGS:
 	#!/usr/bin/env bash
 	set -e
@@ -131,37 +135,23 @@ develop *ARGS:
 		{{DOCKER_IMAGE}} \
 		bash -c "$DOCKER_CMD"
 
-# Install dependencies
-install:
-	npm install
-
-# Build the project
-build:
-	npm run build
-
-# Run tests
-test *ARGS:
-	npm run test -- {{ARGS}}
-
-# Run tests in watch mode
-test-watch:
-	npm run test:watch
-
-# Run tests with coverage (100% required)
-test-cov:
-	npm run test:cov
-
-# Run linter
-lint:
-	npm run lint
-
-# Format code
 format:
 	npm run format
 
-# Run all checks
-check: lint test
+install:
+	npm install
 
-# Clean build artifacts
-clean:
-	rm -rf dist/ node_modules/.cache/ coverage/
+lint:
+	npm run lint
+
+test *ARGS:
+	npm run test -- {{ARGS}}
+
+test-cov:
+	npm run test:cov
+
+test-watch:
+	npm run test:watch
+
+validate-devcontainer:
+	@test -f .devcontainer/devcontainer.json && test -f .devcontainer/Dockerfile && echo "Devcontainer configuration valid"

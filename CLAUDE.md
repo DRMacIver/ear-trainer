@@ -1,31 +1,58 @@
 # ear-trainer
 
-## IMPORTANT: Fresh Project Setup
+An experiment in developing ear training exercises for developing perfect pitch. This is a single-page web app with no server component.
 
-**This is a freshly created project from the drmaciver-project template.**
+## Project Overview
 
-Your first task is to help set up this project properly:
+The app presents various exercises focused on identifying musical notes. The initial exercises are variations on naming a particular note in increasingly difficult contexts.
 
-1. **Understand the project's purpose** - Ask the user what this project is for
-2. **Create a development plan** - Use beads (`bd create`) to track planned work
-3. **Update this CLAUDE.md** - Replace this section with project-specific instructions
+### Pages
 
-Until you've completed setup, this file contains only generic instructions. Update it with:
-- Project overview and architecture
-- Important conventions and patterns
-- Key files and their purposes
-- Any domain-specific knowledge
+- **Note Playground**: Explore notes and learn about musical notation (sharps, flats, octaves, frequencies).
 
-## Current Capabilities
+### Current Exercises
 
-This project was created with the following capabilities (see `.capabilities.json`):
-- **devcontainer**: Development container with all tools pre-installed
-- **claude-code**: Claude Code commands, hooks, and scripts
+- **Note Choice**: Plays a single note and asks you to identify which of two options it is. Good for beginners. Keyboard controls: Left/Right arrows.
+- **Progressive Note ID**: Adaptive difficulty training. Starts with 2 notes (C4 + one distant), adds more as you improve. 10 correct in a row increases difficulty (up to 10 notes). 50% wrong in last 10 decreases difficulty. Keyboard controls: number keys 1-9, 0 for 10.
+- **Note Matching**: Plays a set of notes, tells you what they are, and asks you to match note names to sounds by dragging them. You check your answers and must reorder incorrect ones until all are correct.
 
-Additional capabilities may have been added. Check `.capabilities.json` for the full list.
+## Architecture
 
-## Development Commands
+```
+src/
+  main.ts              # Entry point, hash-based routing
+  audio.ts             # Web Audio API utilities for pure tones
+  styles.css           # Global styles
+  pages/
+    index.ts           # Exercise index page
+    playground.ts      # Note playground with notation guide
+    note-choice.ts     # Two-option note identification
+    progressive-id.ts  # Adaptive difficulty note identification
+    note-matching.ts   # Drag-and-drop note matching
+```
 
+### Key Patterns
+
+- **Routing**: Simple hash-based routing (`#/exercises/note-matching`)
+- **Audio**: Pure tones generated via Web Audio API oscillators (sine waves)
+- **State**: Exercise state is managed within each exercise module
+- **No frameworks**: Vanilla TypeScript with direct DOM manipulation
+
+### Note Frequencies
+
+Notes use equal temperament tuning with A4 = 440 Hz. Supports three octaves (C3-B5) in the playground, exercises currently use octave 4 only.
+
+## Development
+
+```bash
+npm run dev          # Start dev server (Vite)
+npm run build        # Build for production
+npm run test         # Run tests
+npm run lint         # Run linter
+npm run format       # Format code
+```
+
+Or use just:
 ```bash
 just install         # Install dependencies
 just test            # Run tests
@@ -33,6 +60,13 @@ just lint            # Run linters
 just format          # Format code
 just check           # Run all checks
 ```
+
+## Future Work
+
+- Instrumental sounds (beyond pure tones)
+- More exercises (interval recognition, chord identification, etc.)
+- Learning rate tracking and progression
+- Configurable difficulty settings
 
 ## Quality Standards
 
@@ -61,7 +95,6 @@ Do NOT wait until the end of the session or until the current task is complete. 
 ```bash
 bd ready              # Find available work (no blockers)
 bd list --status=open # All open issues
-bd show <id>          # View issue details
 bd create --title="..." --type=task --priority=2  # Create new issue
 bd update <id> --status=in_progress  # Claim work
 bd close <id>         # Complete work

@@ -53,8 +53,8 @@ RUN uv tool install pre-commit
 USER dev
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/home/dev/.local/bin:$PATH"
-
-# Install Claude Code using native installer (supports auto-updates)
-# See: https://code.claude.com/docs/en/setup
-RUN curl -fsSL https://claude.ai/install.sh | bash
 USER root
+
+# NOTE: Claude Code is installed at container startup (in entrypoint.sh),
+# not here in the Dockerfile, because /home/dev is mounted as a volume
+# and would shadow any files installed during build.

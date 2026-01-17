@@ -23,6 +23,7 @@ if [ -f "$PROJECT_DIR/pyproject.toml" ]; then
     # Use --quiet to prevent progress output to stderr (which Claude Code interprets as error)
     exec uv run --quiet --project "$PROJECT_DIR" --group dev python3 "$@"
 else
-    # No pyproject.toml, just run with system Python
-    exec python3 "$@"
+    # No pyproject.toml - use uv to run with required hook dependencies
+    # Claude Code hooks require pyyaml even in non-Python projects
+    exec uv run --quiet --with pyyaml python3 "$@"
 fi

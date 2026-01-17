@@ -1,0 +1,358 @@
+/**
+ * Progressive Note Identification Exercise
+ *
+ * Adaptive difficulty exercise where students identify notes from a growing set.
+ * - Starts with 2 notes (C4 + one distant note)
+ * - Increases difficulty after 10 correct in a row
+ * - Decreases difficulty if 50% of last 10 are wrong
+ * - Max 10 notes, min 2 notes
+ */
+
+import { OCTAVE_4_NOTES, playNote } from "../audio.js";
+
+const STREAK_TO_INCREASE = 10;
+const WINDOW_SIZE = 10;
+const FAILURE_THRESHOLD = 0.5;
+const MIN_NOTES = 2;
+const MAX_NOTES = 10;
+
+interface ExerciseState {
+  // Current set of notes (indices into OCTAVE_4_NOTES)
+  noteIndices: number[];
+  // The current note being tested (index into noteIndices)
+  currentNoteIdx: number;
+  // Recent answers (true = correct, false = wrong)
+  recentAnswers: boolean[];
+  // Current streak of correct answers
+  streak: number;
+  // Whether user has answered current question
+  hasAnswered: boolean;
+  // Was the answer correct
+  wasCorrect: boolean | null;
+  // What index did the user choose (for showing incorrect highlight)
+  chosenIdx: number | null;
+  // Total stats
+  totalCorrect: number;
+  totalAttempts: number;
+}
+
+let state: ExerciseState;
+let keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
+
+/**
+ * Get the semitone index for a note (0-11 within octave 4).
+ */
+function getNoteIndex(note: string): number {
+  return OCTAVE_4_NOTES.indexOf(note);
+}
+
+/**
+ * Calculate minimum semitone distance from a note to any note in a set.
+ */
+function minDistanceToSet(noteIdx: number, setIndices: number[]): number {
+  if (setIndices.length === 0) return 12;
+  return Math.min(...setIndices.map((idx) => Math.abs(noteIdx - idx)));
+}
+
+/**
+ * Select a note that is well-differentiated from existing notes.
+ * Prefers notes that maximize minimum distance to existing notes.
+ */
+function selectDifferentiatedNote(existingIndices: number[]): number {
+  const available: number[] = [];
+  for (let i = 0; i < OCTAVE_4_NOTES.length; i++) {
+    if (!existingIndices.includes(i)) {
+      available.push(i);
+    }
+  }
+
+  if (available.length === 0) return -1;
+
+  // Score each available note by its minimum distance to existing notes
+  const scored = available.map((idx) => ({
+    idx,
+    distance: minDistanceToSet(idx, existingIndices),
+  }));
+
+  // Sort by distance descending, pick randomly from top candidates
+  scored.sort((a, b) => b.distance - a.distance);
+  const maxDist = scored[0].distance;
+  const topCandidates = scored.filter((s) => s.distance === maxDist);
+
+  return topCandidates[Math.floor(Math.random() * topCandidates.length)].idx;
+}
+
+/**
+ * Initialize the exercise with 2 notes: C4 and one distant note.
+ */
+function initExercise(): void {
+  const c4Index = getNoteIndex("C4");
+  const secondNote = selectDifferentiatedNote([c4Index]);
+
+  state = {
+    noteIndices: [c4Index, secondNote].sort((a, b) => a - b),
+    currentNoteIdx: 0,
+    recentAnswers: [],
+    streak: 0,
+    hasAnswered: false,
+    wasCorrect: null,
+    chosenIdx: null,
+    totalCorrect: 0,
+    totalAttempts: 0,
+  };
+
+  pickNextNote();
+}
+
+function pickNextNote(): void {
+  state.currentNoteIdx = Math.floor(Math.random() * state.noteIndices.length);
+  state.hasAnswered = false;
+  state.wasCorrect = null;
+  state.chosenIdx = null;
+}
+
+function getCurrentNote(): string {
+  return OCTAVE_4_NOTES[state.noteIndices[state.currentNoteIdx]];
+}
+
+function getActiveNotes(): string[] {
+  return state.noteIndices.map((idx) => OCTAVE_4_NOTES[idx]);
+}
+
+function increaseDifficulty(): void {
+  if (state.noteIndices.length < MAX_NOTES) {
+    const newNote = selectDifferentiatedNote(state.noteIndices);
+    if (newNote !== -1) {
+      state.noteIndices.push(newNote);
+      state.noteIndices.sort((a, b) => a - b);
+    }
+  } else {
+    // At max, swap out a random non-C4 note
+    const c4Index = getNoteIndex("C4");
+    const swappable = state.noteIndices.filter((idx) => idx !== c4Index);
+    if (swappable.length > 0) {
+      const toRemove = swappable[Math.floor(Math.random() * swappable.length)];
+      state.noteIndices = state.noteIndices.filter((idx) => idx !== toRemove);
+      const newNote = selectDifferentiatedNote(state.noteIndices);
+      if (newNote !== -1) {
+        state.noteIndices.push(newNote);
+        state.noteIndices.sort((a, b) => a - b);
+      }
+    }
+  }
+}
+
+function decreaseDifficulty(): void {
+  if (state.noteIndices.length > MIN_NOTES) {
+    const c4Index = getNoteIndex("C4");
+    const removable = state.noteIndices.filter((idx) => idx !== c4Index);
+    if (removable.length > 0) {
+      const toRemove = removable[Math.floor(Math.random() * removable.length)];
+      state.noteIndices = state.noteIndices.filter((idx) => idx !== toRemove);
+    }
+  }
+}
+
+function checkDifficultyAdjustment(): void {
+  // Check for increase: 10 correct in a row
+  if (state.streak >= STREAK_TO_INCREASE) {
+    increaseDifficulty();
+    state.streak = 0;
+  }
+
+  // Check for decrease: 50% wrong in last 10
+  if (state.recentAnswers.length >= WINDOW_SIZE) {
+    const recent = state.recentAnswers.slice(-WINDOW_SIZE);
+    const wrongCount = recent.filter((a) => !a).length;
+    if (wrongCount / WINDOW_SIZE >= FAILURE_THRESHOLD) {
+      decreaseDifficulty();
+      state.recentAnswers = [];
+      state.streak = 0;
+    }
+  }
+}
+
+function handleAnswer(chosenIdx: number): void {
+  if (state.hasAnswered) {
+    pickNextNote();
+    render();
+    playCurrentNote();
+    return;
+  }
+
+  if (chosenIdx < 0 || chosenIdx >= state.noteIndices.length) return;
+
+  state.hasAnswered = true;
+  state.chosenIdx = chosenIdx;
+  state.wasCorrect = chosenIdx === state.currentNoteIdx;
+  state.totalAttempts++;
+
+  if (state.wasCorrect) {
+    state.streak++;
+    state.totalCorrect++;
+  } else {
+    state.streak = 0;
+  }
+
+  state.recentAnswers.push(state.wasCorrect);
+  if (state.recentAnswers.length > WINDOW_SIZE * 2) {
+    state.recentAnswers = state.recentAnswers.slice(-WINDOW_SIZE);
+  }
+
+  checkDifficultyAdjustment();
+  render();
+}
+
+function playCurrentNote(): void {
+  playNote(getCurrentNote(), { duration: 0.8 });
+}
+
+function render(): void {
+  const app = document.getElementById("app")!;
+  const notes = getActiveNotes();
+
+  app.innerHTML = `
+    <a href="#/" class="back-link">&larr; Back to exercises</a>
+    <h1>Progressive Note ID</h1>
+    <p>Identify the note you hear. Use <strong>number keys (1-${notes.length})</strong> or click. Press <strong>Space</strong> to replay.</p>
+
+    <div class="exercise-container">
+      <div class="controls">
+        <button class="play-again-btn" id="play-btn">Play Note</button>
+      </div>
+
+      <div>
+        <h3>Which note is it? <span class="note-count">(${notes.length} notes)</span></h3>
+        <div class="progressive-note-buttons" id="note-buttons"></div>
+      </div>
+
+      <div id="feedback"></div>
+
+      <div class="stats-row">
+        <div class="stats">
+          <span class="stats-label">Score:</span>
+          <span>${state.totalCorrect} / ${state.totalAttempts}</span>
+        </div>
+        <div class="stats">
+          <span class="stats-label">Streak:</span>
+          <span>${state.streak}${state.streak >= 5 ? " 🔥" : ""}</span>
+        </div>
+        <div class="stats">
+          <span class="stats-label">Level:</span>
+          <span>${notes.length} notes</span>
+        </div>
+      </div>
+    </div>
+  `;
+
+  renderNoteButtons();
+  renderFeedback();
+  setupEventListeners();
+}
+
+function renderNoteButtons(): void {
+  const container = document.getElementById("note-buttons")!;
+  const notes = getActiveNotes();
+
+  notes.forEach((note, index) => {
+    const wrapper = document.createElement("div");
+    wrapper.className = "progressive-note-wrapper";
+
+    const button = document.createElement("button");
+    button.className = "progressive-note-btn";
+    button.textContent = note;
+
+    if (state.hasAnswered) {
+      if (index === state.currentNoteIdx) {
+        button.classList.add("correct");
+      } else if (index === state.chosenIdx) {
+        button.classList.add("incorrect");
+      }
+    }
+
+    button.addEventListener("click", () => handleAnswer(index));
+
+    const label = document.createElement("div");
+    label.className = "key-label";
+    label.textContent = index === 9 ? "0" : String(index + 1);
+
+    wrapper.appendChild(button);
+    wrapper.appendChild(label);
+    container.appendChild(wrapper);
+  });
+}
+
+function renderFeedback(): void {
+  const feedback = document.getElementById("feedback");
+  if (!feedback) return;
+
+  if (!state.hasAnswered) {
+    feedback.className = "";
+    feedback.textContent = "";
+    return;
+  }
+
+  const correctNote = getCurrentNote();
+  if (state.wasCorrect) {
+    feedback.className = "feedback success";
+    feedback.textContent = "Correct! Press Space to continue.";
+  } else {
+    feedback.className = "feedback error";
+    feedback.textContent = `That was ${correctNote}. Press Space to continue.`;
+  }
+}
+
+function setupEventListeners(): void {
+  const playBtn = document.getElementById("play-btn")!;
+  playBtn.addEventListener("click", playCurrentNote);
+
+  if (keyboardHandler) {
+    document.removeEventListener("keydown", keyboardHandler);
+  }
+
+  keyboardHandler = (e: KeyboardEvent) => {
+    const notes = getActiveNotes();
+
+    if (e.key === " ") {
+      e.preventDefault();
+      if (state.hasAnswered) {
+        pickNextNote();
+        render();
+        playCurrentNote();
+      } else {
+        playCurrentNote();
+      }
+      return;
+    }
+
+    // Number keys 1-9 and 0 (for 10)
+    let keyNum = -1;
+    if (e.key >= "1" && e.key <= "9") {
+      keyNum = parseInt(e.key, 10) - 1;
+    } else if (e.key === "0") {
+      keyNum = 9;
+    }
+
+    if (keyNum >= 0 && keyNum < notes.length) {
+      e.preventDefault();
+      handleAnswer(keyNum);
+    }
+  };
+
+  document.addEventListener("keydown", keyboardHandler);
+
+  const cleanupOnNavigate = () => {
+    if (keyboardHandler) {
+      document.removeEventListener("keydown", keyboardHandler);
+      keyboardHandler = null;
+    }
+    window.removeEventListener("hashchange", cleanupOnNavigate);
+  };
+  window.addEventListener("hashchange", cleanupOnNavigate);
+}
+
+export function renderProgressiveId(): void {
+  initExercise();
+  render();
+  playCurrentNote();
+}
