@@ -3,16 +3,15 @@
  *
  * Adaptive difficulty exercise where students identify notes from a growing set.
  * - Starts with 2 notes (C4 + one distant note)
- * - Increases difficulty after 10 correct in a row
- * - Decreases difficulty if 50% of last 10 are wrong
+ * - Uses EMA-based difficulty adjustment
  * - Max 10 notes, min 2 notes
  */
 
 import { OCTAVE_4_NOTES, playNote } from "../audio.js";
 import {
   checkDifficultyAdjustment,
+  createDifficultyState,
   DifficultyState,
-  DEFAULT_DIFFICULTY_CONFIG,
 } from "../lib/difficulty.js";
 import {
   HistoryEntry,
@@ -43,6 +42,8 @@ interface ExerciseState {
   // Total stats
   totalCorrect: number;
   totalAttempts: number;
+  // Current streak (for display)
+  streak: number;
   // Most recently added note (to highlight as new)
   newNoteIdx: number | null;
   // Whether input is currently accepted
@@ -165,16 +166,13 @@ function initExercise(): void {
   state = {
     noteIndices: [c4Index, secondNote].sort((a, b) => a - b),
     currentNoteIdx: 0,
-    difficulty: {
-      level: MIN_NOTES,
-      streak: 0,
-      recentAnswers: [],
-    },
+    difficulty: createDifficultyState(MIN_NOTES),
     hasAnswered: false,
     wasCorrect: null,
     chosenIdx: null,
     totalCorrect: 0,
     totalAttempts: 0,
+    streak: 0,
     newNoteIdx: null,
     inputEnabled: false,
     history: [],
@@ -248,15 +246,13 @@ function applyDifficultyAdjustment(wasCorrect: boolean): void {
     state.difficulty,
     wasCorrect,
     MIN_NOTES,
-    MAX_NOTES,
-    DEFAULT_DIFFICULTY_CONFIG
+    MAX_NOTES
   );
 
   // Update difficulty state
   state.difficulty = {
     level: adjustment.newLevel,
-    streak: adjustment.newStreak,
-    recentAnswers: adjustment.newRecentAnswers,
+    ema: adjustment.newEma,
   };
 
   // Apply note changes based on level change
@@ -300,14 +296,17 @@ function handleAnswer(chosenIdx: number): void {
 
   if (state.wasCorrect) {
     state.totalCorrect++;
+    state.streak++;
     // Clear new note highlight if it was correctly identified
     const chosenNoteIdx = state.noteIndices[chosenIdx];
     if (chosenNoteIdx === state.newNoteIdx) {
       state.newNoteIdx = null;
     }
+  } else {
+    state.streak = 0;
   }
 
-  // Apply difficulty adjustment (handles streak and recent answers internally)
+  // Apply difficulty adjustment
   applyDifficultyAdjustment(state.wasCorrect);
   render();
 
@@ -370,7 +369,7 @@ function render(): void {
         </div>
         <div class="stats streak-stat">
           <span class="stats-label">Streak:</span>
-          <span>${state.difficulty.streak}${state.difficulty.streak >= 5 ? " 🔥" : ""}</span>
+          <span>${state.streak}${state.streak >= 5 ? " 🔥" : ""}</span>
         </div>
         <div class="stats">
           <span class="stats-label">Level:</span>

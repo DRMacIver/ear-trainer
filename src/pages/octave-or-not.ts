@@ -10,6 +10,7 @@
 import { playNote, NOTE_FREQUENCIES } from "../audio.js";
 import {
   checkDifficultyAdjustment,
+  createDifficultyState,
   DifficultyState,
 } from "../lib/difficulty.js";
 import {
@@ -87,6 +88,8 @@ interface ExerciseState {
   // Stats
   totalCorrect: number;
   totalAttempts: number;
+  // Current streak (for display)
+  streak: number;
   // Whether input is enabled
   inputEnabled: boolean;
   // Session history
@@ -166,16 +169,13 @@ function initExercise(): void {
     notes: round.notes,
     isOctave: round.isOctave,
     interval: round.interval,
-    difficulty: {
-      level: 1,
-      streak: 0,
-      recentAnswers: [],
-    },
+    difficulty: createDifficultyState(1),
     hasAnswered: false,
     wasCorrect: null,
     userSaidOctave: null,
     totalCorrect: 0,
     totalAttempts: 0,
+    streak: 0,
     inputEnabled: false,
     history: [],
     showingHistory: false,
@@ -234,6 +234,9 @@ function handleAnswer(saidOctave: boolean): void {
 
   if (state.wasCorrect) {
     state.totalCorrect++;
+    state.streak++;
+  } else {
+    state.streak = 0;
   }
 
   // Check difficulty adjustment
@@ -246,8 +249,7 @@ function handleAnswer(saidOctave: boolean): void {
 
   state.difficulty = {
     level: adjustment.newLevel,
-    streak: adjustment.newStreak,
-    recentAnswers: adjustment.newRecentAnswers,
+    ema: adjustment.newEma,
   };
 
   render();
@@ -331,7 +333,7 @@ function render(): void {
         </div>
         <div class="stats streak-stat">
           <span class="stats-label">Streak:</span>
-          <span>${state.difficulty.streak}${state.difficulty.streak >= 5 ? " \u{1F525}" : ""}</span>
+          <span>${state.streak}${state.streak >= 5 ? " \u{1F525}" : ""}</span>
         </div>
         <div class="stats">
           <span class="stats-label">Level:</span>
