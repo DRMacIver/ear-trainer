@@ -23,7 +23,7 @@ const NOTE_DURATION = 0.8;
 // Adaptive difficulty parameters
 const INITIAL_BAR_WIDTH = 1.0; // 1 octave = 2:1 ratio
 const MIN_BAR_WIDTH = 0.1; // Minimum ~1.07:1 ratio (very hard)
-const MAX_BAR_WIDTH = 1.5; // Maximum ~2.83:1 ratio (very easy)
+const MAX_BAR_WIDTH = 1.0; // Maximum 2:1 ratio (1 octave)
 const WARMUP_ROUNDS = 5; // Use fixed width for first N rounds
 const TARGET_SUCCESS_RATE = 0.85; // Aim for 85% success
 const DECAY_FACTOR = 0.97; // Weight decay per round (gradual)
