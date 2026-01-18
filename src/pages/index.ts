@@ -91,6 +91,42 @@ export function renderIndex(): void {
           </div>
         </a>
       </li>
+      <li>
+        <a href="#/exercises/higher-or-lower">
+          <div class="title">Higher or Lower</div>
+          <div class="description">
+            A tone plays and a frequency is shown. Is the tone higher, lower, or
+            about the same? Difficulty adapts based on how close you can distinguish.
+          </div>
+        </a>
+      </li>
+      <li>
+        <a href="#/exercises/freq-multiple-choice">
+          <div class="title">What Frequency Is This?</div>
+          <div class="description">
+            A tone plays - pick the correct frequency from 2-5 choices.
+            Difficulty increases with more choices and closer options.
+          </div>
+        </a>
+      </li>
+      <li>
+        <a href="#/exercises/frequency-ratio">
+          <div class="title">Frequency Ratio</div>
+          <div class="description">
+            Two tones play - pick the ratio between them from multiple choices.
+            Tests your ability to perceive relative pitch relationships.
+          </div>
+        </a>
+      </li>
+      <li>
+        <a href="#/exercises/ratio-range">
+          <div class="title">Ratio Range</div>
+          <div class="description">
+            Two tones play - place your range bar to estimate the ratio between them.
+            Like Frequency Range, but for ratios between two sounds.
+          </div>
+        </a>
+      </li>
     </ul>
   `;
 }
