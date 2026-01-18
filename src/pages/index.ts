@@ -127,6 +127,15 @@ export function renderIndex(): void {
           </div>
         </a>
       </li>
+      <li>
+        <a href="#/exercises/match-the-frequency">
+          <div class="title">Match the Frequency</div>
+          <div class="description">
+            A frequency is shown and two tones play - which one matches the displayed
+            frequency? Difficulty adapts based on how close the tones are together.
+          </div>
+        </a>
+      </li>
     </ul>
   `;
 }

@@ -15,6 +15,7 @@ import { renderHigherOrLower } from "./pages/higher-or-lower.js";
 import { renderFreqMultipleChoice } from "./pages/freq-multiple-choice.js";
 import { renderFrequencyRatio } from "./pages/frequency-ratio.js";
 import { renderRatioRange } from "./pages/ratio-range.js";
+import { renderMatchTheFrequency } from "./pages/match-the-frequency.js";
 
 type Route = () => void | Promise<void>;
 
@@ -33,6 +34,7 @@ const routes: Record<string, Route> = {
   "#/exercises/freq-multiple-choice": renderFreqMultipleChoice,
   "#/exercises/frequency-ratio": renderFrequencyRatio,
   "#/exercises/ratio-range": renderRatioRange,
+  "#/exercises/match-the-frequency": renderMatchTheFrequency,
 };
 
 function router(): void {
