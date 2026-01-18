@@ -9,10 +9,12 @@
  */
 
 import { OCTAVE_4_NOTES, playNote } from "../audio.js";
+import {
+  checkDifficultyAdjustment,
+  DifficultyState,
+  DEFAULT_DIFFICULTY_CONFIG,
+} from "../lib/difficulty.js";
 
-const STREAK_TO_INCREASE = 10;
-const WINDOW_SIZE = 10;
-const FAILURE_THRESHOLD = 0.5;
 const MIN_NOTES = 2;
 const MAX_NOTES = 10;
 const WRONG_ANSWER_DELAY = 1000; // ms to show wrong answer before continuing
@@ -24,10 +26,8 @@ interface ExerciseState {
   noteIndices: number[];
   // The current note being tested (index into noteIndices)
   currentNoteIdx: number;
-  // Recent answers (true = correct, false = wrong)
-  recentAnswers: boolean[];
-  // Current streak of correct answers
-  streak: number;
+  // Difficulty state (level = number of notes)
+  difficulty: DifficultyState;
   // Whether user has answered current question
   hasAnswered: boolean;
   // Was the answer correct
@@ -153,8 +153,11 @@ function initExercise(): void {
   state = {
     noteIndices: [c4Index, secondNote].sort((a, b) => a - b),
     currentNoteIdx: 0,
-    recentAnswers: [],
-    streak: 0,
+    difficulty: {
+      level: MIN_NOTES,
+      streak: 0,
+      recentAnswers: [],
+    },
     hasAnswered: false,
     wasCorrect: null,
     chosenIdx: null,
@@ -226,22 +229,27 @@ function decreaseDifficulty(): void {
   }
 }
 
-function checkDifficultyAdjustment(): void {
-  // Check for increase: 10 correct in a row
-  if (state.streak >= STREAK_TO_INCREASE) {
-    increaseDifficulty();
-    state.streak = 0;
-  }
+function applyDifficultyAdjustment(wasCorrect: boolean): void {
+  const adjustment = checkDifficultyAdjustment(
+    state.difficulty,
+    wasCorrect,
+    MIN_NOTES,
+    MAX_NOTES,
+    DEFAULT_DIFFICULTY_CONFIG
+  );
 
-  // Check for decrease: 50% wrong in last 10
-  if (state.recentAnswers.length >= WINDOW_SIZE) {
-    const recent = state.recentAnswers.slice(-WINDOW_SIZE);
-    const wrongCount = recent.filter((a) => !a).length;
-    if (wrongCount / WINDOW_SIZE >= FAILURE_THRESHOLD) {
-      decreaseDifficulty();
-      state.recentAnswers = [];
-      state.streak = 0;
-    }
+  // Update difficulty state
+  state.difficulty = {
+    level: adjustment.newLevel,
+    streak: adjustment.newStreak,
+    recentAnswers: adjustment.newRecentAnswers,
+  };
+
+  // Apply note changes based on level change
+  if (adjustment.changed === "increased") {
+    increaseDifficulty();
+  } else if (adjustment.changed === "decreased") {
+    decreaseDifficulty();
   }
 }
 
@@ -266,23 +274,16 @@ function handleAnswer(chosenIdx: number): void {
   state.totalAttempts++;
 
   if (state.wasCorrect) {
-    state.streak++;
     state.totalCorrect++;
     // Clear new note highlight if it was correctly identified
     const chosenNoteIdx = state.noteIndices[chosenIdx];
     if (chosenNoteIdx === state.newNoteIdx) {
       state.newNoteIdx = null;
     }
-  } else {
-    state.streak = 0;
   }
 
-  state.recentAnswers.push(state.wasCorrect);
-  if (state.recentAnswers.length > WINDOW_SIZE * 2) {
-    state.recentAnswers = state.recentAnswers.slice(-WINDOW_SIZE);
-  }
-
-  checkDifficultyAdjustment();
+  // Apply difficulty adjustment (handles streak and recent answers internally)
+  applyDifficultyAdjustment(state.wasCorrect);
   render();
 
   // Auto-advance: brief flash if correct, longer delay if wrong
@@ -329,7 +330,7 @@ function render(): void {
         </div>
         <div class="stats streak-stat">
           <span class="stats-label">Streak:</span>
-          <span>${state.streak}${state.streak >= 5 ? " 🔥" : ""}</span>
+          <span>${state.difficulty.streak}${state.difficulty.streak >= 5 ? " 🔥" : ""}</span>
         </div>
         <div class="stats">
           <span class="stats-label">Level:</span>

@@ -52,6 +52,15 @@ export function renderIndex(): void {
         </a>
       </li>
       <li>
+        <a href="#/exercises/octave-or-not">
+          <div class="title">Octave or Not</div>
+          <div class="description">
+            Two notes play (low then high) - are they an octave apart?
+            Adaptive difficulty adds more intervals as you improve.
+          </div>
+        </a>
+      </li>
+      <li>
         <a href="#/exercises/progressive-id">
           <div class="title">Progressive Note ID</div>
           <div class="description">
