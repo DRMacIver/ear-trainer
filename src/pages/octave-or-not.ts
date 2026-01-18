@@ -12,6 +12,11 @@ import {
   checkDifficultyAdjustment,
   DifficultyState,
 } from "../lib/difficulty.js";
+import {
+  HistoryEntry,
+  renderHistorySummary,
+  setupHistoryBackButton,
+} from "../lib/history.js";
 
 const NOTE_DURATION = 0.6;
 const NOTE_GAP = 0.3;
@@ -83,6 +88,10 @@ interface ExerciseState {
   totalAttempts: number;
   // Whether input is enabled
   inputEnabled: boolean;
+  // Session history
+  history: HistoryEntry[];
+  // Whether showing history view
+  showingHistory: boolean;
 }
 
 let state: ExerciseState;
@@ -165,6 +174,8 @@ function initExercise(): void {
     totalCorrect: 0,
     totalAttempts: 0,
     inputEnabled: false,
+    history: [],
+    showingHistory: false,
   };
 }
 
@@ -207,6 +218,15 @@ function handleAnswer(saidOctave: boolean): void {
   state.userSaidOctave = saidOctave;
   state.wasCorrect = saidOctave === state.isOctave;
   state.totalAttempts++;
+
+  // Record history
+  const intervalName = getIntervalName(state.interval);
+  state.history.push({
+    prompt: `${state.notes[0]} → ${state.notes[1]}`,
+    userAnswer: saidOctave ? "Yes (Octave)" : "No (Not octave)",
+    correctAnswer: state.isOctave ? `Yes (${intervalName})` : `No (${intervalName})`,
+    correct: state.wasCorrect,
+  });
 
   if (state.wasCorrect) {
     state.totalCorrect++;
@@ -261,6 +281,16 @@ function getIntervalName(semitones: number): string {
 function render(): void {
   const app = document.getElementById("app")!;
 
+  if (state.showingHistory) {
+    app.innerHTML = renderHistorySummary(state.history, "Octave or Not");
+    setupHistoryBackButton(() => {
+      state.showingHistory = false;
+      render();
+      playBothNotes();
+    });
+    return;
+  }
+
   app.innerHTML = `
     <a href="#/" class="back-link">&larr; Back to exercises</a>
     <h1>Octave or Not</h1>
@@ -270,6 +300,7 @@ function render(): void {
     <div class="exercise-container">
       <div class="controls">
         <button class="play-again-btn" id="play-btn">Play Again</button>
+        <button class="done-button" id="done-btn">Done</button>
       </div>
 
       <div>
@@ -364,6 +395,12 @@ function setupEventListeners(): void {
     if (!state.hasAnswered) {
       playBothNotes();
     }
+  });
+
+  const doneBtn = document.getElementById("done-btn")!;
+  doneBtn.addEventListener("click", () => {
+    state.showingHistory = true;
+    render();
   });
 
   if (keyboardHandler) {

@@ -5,6 +5,11 @@
  */
 
 import { playNote, selectRandomNotes } from "../audio.js";
+import {
+  HistoryEntry,
+  renderHistorySummary,
+  setupHistoryBackButton,
+} from "../lib/history.js";
 
 interface ExerciseState {
   // The two notes to choose between
@@ -18,6 +23,10 @@ interface ExerciseState {
   // Running score
   correct: number;
   total: number;
+  // Session history
+  history: HistoryEntry[];
+  // Whether showing history view
+  showingHistory: boolean;
 }
 
 let state: ExerciseState;
@@ -34,11 +43,23 @@ function initExercise(preserveScore = false): void {
     wasCorrect: null,
     correct: preserveScore ? state.correct : 0,
     total: preserveScore ? state.total : 0,
+    history: preserveScore ? state.history : [],
+    showingHistory: false,
   };
 }
 
 function render(): void {
   const app = document.getElementById("app")!;
+
+  if (state.showingHistory) {
+    app.innerHTML = renderHistorySummary(state.history, "Note Choice");
+    setupHistoryBackButton(() => {
+      state.showingHistory = false;
+      render();
+      playCurrentNote();
+    });
+    return;
+  }
 
   app.innerHTML = `
     <a href="#/" class="back-link">&larr; Back to exercises</a>
@@ -48,6 +69,7 @@ function render(): void {
     <div class="exercise-container">
       <div class="controls">
         <button class="play-again-btn" id="play-btn">Play Note</button>
+        <button class="done-button" id="done-btn">Done</button>
       </div>
 
       <div>
@@ -94,6 +116,12 @@ function renderChoiceButtons(): void {
 function setupEventListeners(): void {
   const playBtn = document.getElementById("play-btn")!;
   playBtn.addEventListener("click", playCurrentNote);
+
+  const doneBtn = document.getElementById("done-btn")!;
+  doneBtn.addEventListener("click", () => {
+    state.showingHistory = true;
+    render();
+  });
 
   // Clean up previous keyboard handler if any
   if (keyboardHandler) {
@@ -146,6 +174,17 @@ function handleChoice(chosenIndex: number): void {
   state.hasAnswered = true;
   state.wasCorrect = chosenIndex === state.correctIndex;
   state.total++;
+
+  // Record history
+  const correctNote = state.choices[state.correctIndex];
+  const chosenNote = state.choices[chosenIndex];
+  state.history.push({
+    prompt: correctNote,
+    userAnswer: chosenNote,
+    correctAnswer: correctNote,
+    correct: state.wasCorrect,
+  });
+
   if (state.wasCorrect) {
     state.correct++;
   }

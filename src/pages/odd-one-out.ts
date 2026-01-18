@@ -6,6 +6,11 @@
  */
 
 import { playNote, shuffle, getChromaticIndex, NOTE_FREQUENCIES } from "../audio.js";
+import {
+  HistoryEntry,
+  renderHistorySummary,
+  setupHistoryBackButton,
+} from "../lib/history.js";
 
 const NOTE_DURATION = 0.6;
 const NOTE_GAP = 0.3;
@@ -45,6 +50,10 @@ interface ExerciseState {
   streak: number;
   // Whether input is enabled
   inputEnabled: boolean;
+  // Session history
+  history: HistoryEntry[];
+  // Whether showing history view
+  showingHistory: boolean;
 }
 
 let state: ExerciseState;
@@ -126,6 +135,8 @@ function initExercise(): void {
     totalAttempts: 0,
     streak: 0,
     inputEnabled: false,
+    history: [],
+    showingHistory: false,
   };
 }
 
@@ -133,6 +144,7 @@ function pickNextRound(): void {
   const prevCorrect = state.totalCorrect;
   const prevAttempts = state.totalAttempts;
   const prevStreak = state.streak;
+  const prevHistory = state.history;
 
   // Pick the "same" note
   const sameNote = randomBaseNote();
@@ -162,6 +174,8 @@ function pickNextRound(): void {
     totalAttempts: prevAttempts,
     streak: prevStreak,
     inputEnabled: false,
+    history: prevHistory,
+    showingHistory: false,
   };
 }
 
@@ -195,6 +209,15 @@ function handleAnswer(chosenIdx: number): void {
   state.wasCorrect = chosenIdx === state.oddIndex;
   state.totalAttempts++;
 
+  // Record history
+  const oddNote = state.notes[state.oddIndex];
+  state.history.push({
+    prompt: state.notes.join(", "),
+    userAnswer: `Sound ${chosenIdx + 1}`,
+    correctAnswer: `Sound ${state.oddIndex + 1} (${oddNote})`,
+    correct: state.wasCorrect,
+  });
+
   if (state.wasCorrect) {
     state.streak++;
     state.totalCorrect++;
@@ -222,6 +245,16 @@ async function advanceToNext(): Promise<void> {
 function render(): void {
   const app = document.getElementById("app")!;
 
+  if (state.showingHistory) {
+    app.innerHTML = renderHistorySummary(state.history, "Odd One Out");
+    setupHistoryBackButton(() => {
+      state.showingHistory = false;
+      render();
+      playAllNotes();
+    });
+    return;
+  }
+
   app.innerHTML = `
     <a href="#/" class="back-link">&larr; Back to exercises</a>
     <h1>Odd One Out</h1>
@@ -231,6 +264,7 @@ function render(): void {
     <div class="exercise-container">
       <div class="controls">
         <button class="play-again-btn" id="play-btn">Play Again</button>
+        <button class="done-button" id="done-btn">Done</button>
       </div>
 
       <div>
@@ -308,6 +342,12 @@ function setupEventListeners(): void {
     if (!state.hasAnswered) {
       playAllNotes();
     }
+  });
+
+  const doneBtn = document.getElementById("done-btn")!;
+  doneBtn.addEventListener("click", () => {
+    state.showingHistory = true;
+    render();
   });
 
   if (keyboardHandler) {

@@ -14,6 +14,11 @@ import {
   DifficultyState,
   DEFAULT_DIFFICULTY_CONFIG,
 } from "../lib/difficulty.js";
+import {
+  HistoryEntry,
+  renderHistorySummary,
+  setupHistoryBackButton,
+} from "../lib/history.js";
 
 const MIN_NOTES = 2;
 const MAX_NOTES = 10;
@@ -41,6 +46,10 @@ interface ExerciseState {
   newNoteIdx: number | null;
   // Whether input is currently accepted
   inputEnabled: boolean;
+  // Session history
+  history: HistoryEntry[];
+  // Whether showing history view
+  showingHistory: boolean;
 }
 
 let state: ExerciseState;
@@ -165,6 +174,8 @@ function initExercise(): void {
     totalAttempts: 0,
     newNoteIdx: null,
     inputEnabled: false,
+    history: [],
+    showingHistory: false,
   };
 
   pickNextNote();
@@ -273,6 +284,16 @@ function handleAnswer(chosenIdx: number): void {
   state.wasCorrect = chosenIdx === state.currentNoteIdx;
   state.totalAttempts++;
 
+  // Record history
+  const correctNote = getCurrentNote();
+  const chosenNote = OCTAVE_4_NOTES[state.noteIndices[chosenIdx]];
+  state.history.push({
+    prompt: correctNote,
+    userAnswer: chosenNote,
+    correctAnswer: correctNote,
+    correct: state.wasCorrect,
+  });
+
   if (state.wasCorrect) {
     state.totalCorrect++;
     // Clear new note highlight if it was correctly identified
@@ -300,6 +321,17 @@ async function playCurrentNote(): Promise<void> {
 
 function render(): void {
   const app = document.getElementById("app")!;
+
+  if (state.showingHistory) {
+    app.innerHTML = renderHistorySummary(state.history, "Progressive Note ID");
+    setupHistoryBackButton(() => {
+      state.showingHistory = false;
+      render();
+      playCurrentNote();
+    });
+    return;
+  }
+
   const notes = getActiveNotes();
 
   app.innerHTML = `
@@ -310,6 +342,7 @@ function render(): void {
     <div class="exercise-container">
       <div class="controls">
         <button class="play-again-btn" id="play-btn">Play Note</button>
+        <button class="done-button" id="done-btn">Done</button>
       </div>
 
       <div>
@@ -406,6 +439,12 @@ function renderFeedback(): void {
 function setupEventListeners(): void {
   const playBtn = document.getElementById("play-btn")!;
   playBtn.addEventListener("click", playCurrentNote);
+
+  const doneBtn = document.getElementById("done-btn")!;
+  doneBtn.addEventListener("click", () => {
+    state.showingHistory = true;
+    render();
+  });
 
   if (keyboardHandler) {
     document.removeEventListener("keydown", keyboardHandler);

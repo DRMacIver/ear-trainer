@@ -501,3 +501,80 @@ a:hover {
 .streak-stat {
   border-left: 3px solid #ff9800;
 }
+
+/* Session History */
+.history-summary {
+  max-width: 800px;
+}
+
+.history-stats {
+  font-size: 1.5rem;
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background: #16213e;
+  border-radius: 8px;
+  display: inline-block;
+}
+
+.history-score {
+  font-weight: bold;
+  color: #64b5f6;
+}
+
+.history-percentage {
+  color: #aaa;
+  margin-left: 0.5rem;
+}
+
+.history-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 1.5rem;
+  background: #16213e;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.history-table th,
+.history-table td {
+  padding: 0.75rem 1rem;
+  text-align: left;
+  border-bottom: 1px solid #333;
+}
+
+.history-table th {
+  background: #0f3460;
+  color: #64b5f6;
+  font-weight: bold;
+}
+
+.history-table tr:last-child td {
+  border-bottom: none;
+}
+
+.history-correct {
+  background: rgba(76, 175, 80, 0.1);
+}
+
+.history-incorrect {
+  background: rgba(244, 67, 54, 0.1);
+}
+
+.history-actions {
+  margin-top: 1rem;
+}
+
+.done-button {
+  background: #ff9800;
+  color: #fff;
+  padding: 0.75rem 1.5rem;
+  font-size: 1rem;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.done-button:hover {
+  background: #ffa726;
+}
