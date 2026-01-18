@@ -24,13 +24,13 @@ const NOTE_GAP = 0.4;
 const AUTO_ADVANCE_DELAY = 1000;
 
 // Version for difficulty reset
-const EXERCISE_VERSION = 1;
+const EXERCISE_VERSION = 2;
 
 // Difficulty is measured as separation between tones in octaves
 // Smaller = harder
-const INITIAL_SEPARATION = 0.4; // ~4.8 semitones
+const INITIAL_SEPARATION = 2.0; // 2 octaves
 const MIN_SEPARATION = 0.08; // ~1 semitone (very hard)
-const MAX_SEPARATION = 0.5; // 6 semitones (easy)
+const MAX_SEPARATION = 2.0; // 2 octaves (easy)
 const WARMUP_ROUNDS = 5;
 const TARGET_SUCCESS_RATE = 0.85;
 const DECAY_FACTOR = 0.97;
