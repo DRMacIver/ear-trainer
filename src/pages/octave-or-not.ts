@@ -96,6 +96,8 @@ interface ExerciseState {
 
 let state: ExerciseState;
 let keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
+let lastSpaceTime = 0;
+const SPACE_DEBOUNCE_MS = 300;
 
 function getBaseNotes(level: number): string[] {
   return BASE_NOTES_BY_LEVEL[Math.min(level, MAX_LEVEL)] || BASE_NOTES_BY_LEVEL[MAX_LEVEL];
@@ -412,7 +414,9 @@ function setupEventListeners(): void {
 
     if (e.key === " ") {
       e.preventDefault();
-      if (!state.hasAnswered) {
+      const now = Date.now();
+      if (!state.hasAnswered && now - lastSpaceTime > SPACE_DEBOUNCE_MS) {
+        lastSpaceTime = now;
         playBothNotes();
       }
       return;

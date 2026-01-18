@@ -58,6 +58,8 @@ interface ExerciseState {
 
 let state: ExerciseState;
 let keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
+let lastSpaceTime = 0;
+const SPACE_DEBOUNCE_MS = 300;
 
 /**
  * Pick a random base note (without octave).
@@ -359,7 +361,9 @@ function setupEventListeners(): void {
 
     if (e.key === " ") {
       e.preventDefault();
-      if (!state.hasAnswered) {
+      const now = Date.now();
+      if (!state.hasAnswered && now - lastSpaceTime > SPACE_DEBOUNCE_MS) {
+        lastSpaceTime = now;
         playAllNotes();
       }
       return;

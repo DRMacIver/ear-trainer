@@ -54,6 +54,8 @@ interface ExerciseState {
 
 let state: ExerciseState;
 let keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
+let lastSpaceTime = 0;
+const SPACE_DEBOUNCE_MS = 300;
 
 // Sharp note indices: C#=1, D#=3, F#=6, G#=8, A#=10
 const SHARP_INDICES = [1, 3, 6, 8, 10];
@@ -458,7 +460,9 @@ function setupEventListeners(): void {
     // Space to replay note
     if (e.key === " ") {
       e.preventDefault();
-      if (!state.hasAnswered) {
+      const now = Date.now();
+      if (!state.hasAnswered && now - lastSpaceTime > SPACE_DEBOUNCE_MS) {
+        lastSpaceTime = now;
         playCurrentNote();
       }
       return;
