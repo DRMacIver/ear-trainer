@@ -5,7 +5,7 @@
  * one is a different note. User identifies which is the odd one.
  */
 
-import { playNote, shuffle, getChromaticIndex } from "../audio.js";
+import { playNote, shuffle, getChromaticIndex, NOTE_FREQUENCIES } from "../audio.js";
 
 const NOTE_DURATION = 0.6;
 const NOTE_GAP = 0.3;
@@ -88,6 +88,13 @@ function pickOddOctave(): number {
   return octaves[Math.floor(Math.random() * octaves.length)];
 }
 
+/**
+ * Sort notes by pitch (frequency) from low to high.
+ */
+function sortByPitch(notes: { note: string; isOdd: boolean }[]): { note: string; isOdd: boolean }[] {
+  return [...notes].sort((a, b) => NOTE_FREQUENCIES[a.note] - NOTE_FREQUENCIES[b.note]);
+}
+
 function initExercise(): void {
   // Pick the "same" note (appears twice in different octaves)
   const sameNote = randomBaseNote();
@@ -102,8 +109,8 @@ function initExercise(): void {
   const sameNote2 = `${sameNote}${octave2}`;
   const oddFull = `${oddNote}${oddOctave}`;
 
-  // Shuffle positions and track where odd one ends up
-  const positions = shuffle([
+  // Sort by pitch (low to high) and track where odd one ends up
+  const positions = sortByPitch([
     { note: sameNote1, isOdd: false },
     { note: sameNote2, isOdd: false },
     { note: oddFull, isOdd: true },
@@ -139,7 +146,7 @@ function pickNextRound(): void {
   const sameNote2 = `${sameNote}${octave2}`;
   const oddFull = `${oddNote}${oddOctave}`;
 
-  const positions = shuffle([
+  const positions = sortByPitch([
     { note: sameNote1, isOdd: false },
     { note: sameNote2, isOdd: false },
     { note: oddFull, isOdd: true },
