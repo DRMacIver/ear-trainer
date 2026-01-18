@@ -196,10 +196,10 @@ function handleSubmit(): void {
     guessPosition: state.selectedPosition,
   });
 
-  // Age markers for display (but keep all history for adaptive difficulty)
-  state.history = state.history.map((m, i) => ({
+  // Age existing markers (new entry starts at 0, shown as "current" marker)
+  state.history = state.history.map((m) => ({
     ...m,
-    age: i, // Age is just the index (0 = newest)
+    age: m.age + (m.age > 0 ? 1 : 0), // Don't age the newest entry yet
   }));
 
   if (state.wasCorrect) {
@@ -220,6 +220,12 @@ function handleSubmit(): void {
 }
 
 function advanceToNext(): void {
+  // Increment ages so the previous answer becomes visible as a history marker
+  state.history = state.history.map((m) => ({
+    ...m,
+    age: m.age + 1,
+  }));
+
   state.currentFrequency = pickRandomFrequency();
   state.hasAnswered = false;
   state.wasCorrect = null;
