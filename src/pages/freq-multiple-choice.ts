@@ -28,7 +28,7 @@ const MAX_LEVEL = 8;
 
 // Version: increment this when difficulty parameters change significantly
 // This will reset saved difficulty for all users
-const EXERCISE_VERSION = 2;
+const EXERCISE_VERSION = 3;
 
 // Number of choices at each level
 // Quick progression to 3 choices, stay there while tightening separation
@@ -58,9 +58,9 @@ const SEPARATION_BY_LEVEL: Record<number, number> = {
 
 // EMA-based difficulty adjustment
 const INITIAL_EMA = 0.85;
-const SMOOTHING_FACTOR = 0.05;
-const PROMOTION_THRESHOLD = 0.92;
-const DEMOTION_THRESHOLD = 0.7;
+const SMOOTHING_FACTOR = 0.1; // 10% weight per answer (was 5%, too slow)
+const PROMOTION_THRESHOLD = 0.9; // Slightly easier to level up
+const DEMOTION_THRESHOLD = 0.65;
 
 interface ExerciseState {
   playedFrequency: number;
