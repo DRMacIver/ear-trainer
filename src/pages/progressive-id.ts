@@ -13,6 +13,7 @@ import {
   createDifficultyState,
   DifficultyState,
 } from "../lib/difficulty.js";
+import { loadDifficulty, saveDifficulty } from "../lib/storage.js";
 import {
   HistoryEntry,
   renderHistorySummary,
@@ -160,13 +161,24 @@ function selectDifferentiatedNote(existingIndices: number[]): number {
  * Initialize the exercise with 2 notes: C4 and one distant note.
  */
 function initExercise(): void {
+  // Load saved level (number of notes), clamped to valid range
+  const savedLevel = loadDifficulty("progressive-id", MIN_NOTES);
+  const targetNotes = Math.max(MIN_NOTES, Math.min(MAX_NOTES, Math.round(savedLevel)));
+
+  // Build note set starting with C4, adding differentiated notes up to target
   const c4Index = getNoteIndex("C4");
-  const secondNote = selectDifferentiatedNote([c4Index]);
+  const noteIndices = [c4Index];
+
+  while (noteIndices.length < targetNotes) {
+    const newNote = selectDifferentiatedNote(noteIndices);
+    noteIndices.push(newNote);
+  }
+  noteIndices.sort((a, b) => a - b);
 
   state = {
-    noteIndices: [c4Index, secondNote].sort((a, b) => a - b),
+    noteIndices,
     currentNoteIdx: 0,
-    difficulty: createDifficultyState(MIN_NOTES),
+    difficulty: createDifficultyState(targetNotes), // Fresh EMA, saved level
     hasAnswered: false,
     wasCorrect: null,
     chosenIdx: null,
@@ -261,6 +273,9 @@ function applyDifficultyAdjustment(wasCorrect: boolean): void {
   } else if (adjustment.changed === "decreased") {
     decreaseDifficulty();
   }
+
+  // Save level for next session
+  saveDifficulty("progressive-id", state.difficulty.level);
 }
 
 async function advanceToNextNote(): Promise<void> {

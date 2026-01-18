@@ -13,6 +13,7 @@ import {
   createDifficultyState,
   DifficultyState,
 } from "../lib/difficulty.js";
+import { loadDifficulty, saveDifficulty } from "../lib/storage.js";
 import {
   HistoryEntry,
   renderHistorySummary,
@@ -163,13 +164,17 @@ function generateRound(level: number): { notes: [string, string]; isOctave: bool
 }
 
 function initExercise(): void {
-  const round = generateRound(1);
+  // Load saved level, clamped to valid range
+  const savedLevel = loadDifficulty("octave-or-not", MIN_LEVEL);
+  const startLevel = Math.max(MIN_LEVEL, Math.min(MAX_LEVEL, Math.round(savedLevel)));
+
+  const round = generateRound(startLevel);
 
   state = {
     notes: round.notes,
     isOctave: round.isOctave,
     interval: round.interval,
-    difficulty: createDifficultyState(1),
+    difficulty: createDifficultyState(startLevel), // Fresh EMA, saved level
     hasAnswered: false,
     wasCorrect: null,
     userSaidOctave: null,
@@ -251,6 +256,9 @@ function handleAnswer(saidOctave: boolean): void {
     level: adjustment.newLevel,
     ema: adjustment.newEma,
   };
+
+  // Save level for next session
+  saveDifficulty("octave-or-not", state.difficulty.level);
 
   render();
 

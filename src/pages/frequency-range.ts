@@ -11,6 +11,7 @@
  */
 
 import { playFrequency } from "../audio.js";
+import { loadDifficulty, saveDifficulty } from "../lib/storage.js";
 
 const MIN_FREQ = 128;
 const MAX_FREQ = 1024;
@@ -87,16 +88,21 @@ function pickRandomFrequency(): number {
 }
 
 function initExercise(): void {
+  // Load saved bar width, or use initial value
+  const savedBarWidth = loadDifficulty("frequency-range", INITIAL_BAR_WIDTH);
+  // Clamp to valid range
+  const barWidth = Math.max(MIN_BAR_WIDTH, Math.min(MAX_BAR_WIDTH, savedBarWidth));
+
   state = {
     currentFrequency: pickRandomFrequency(),
     selectedPosition: 0.5,
     hasAnswered: false,
     wasCorrect: null,
-    barWidth: INITIAL_BAR_WIDTH,
+    barWidth,
     totalCorrect: 0,
     totalAttempts: 0,
     streak: 0,
-    history: [],
+    history: [], // Fresh history each session (adaptive calc restarts)
     inputEnabled: false,
     isDragging: false,
   };
@@ -205,6 +211,7 @@ function handleSubmit(): void {
 
   // Apply adaptive difficulty adjustment
   state.barWidth = calculateAdaptiveBarWidth();
+  saveDifficulty("frequency-range", state.barWidth);
 
   render();
 
