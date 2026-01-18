@@ -7,7 +7,7 @@
  * - Using non-octave intervals closer to 12 semitones
  */
 
-import { playNote, NOTE_FREQUENCIES } from "../audio.js";
+import { playNote, NOTE_FREQUENCIES, isPlaying } from "../audio.js";
 import {
   checkDifficultyAdjustment,
   DifficultyState,
@@ -392,7 +392,7 @@ function renderFeedback(): void {
 function setupEventListeners(): void {
   const playBtn = document.getElementById("play-btn")!;
   playBtn.addEventListener("click", () => {
-    if (!state.hasAnswered) {
+    if (!state.hasAnswered && !isPlaying()) {
       playBothNotes();
     }
   });
@@ -410,7 +410,7 @@ function setupEventListeners(): void {
   keyboardHandler = (e: KeyboardEvent) => {
     if (e.key === " ") {
       e.preventDefault();
-      if (!state.hasAnswered) {
+      if (!state.hasAnswered && !isPlaying()) {
         playBothNotes();
       }
       return;

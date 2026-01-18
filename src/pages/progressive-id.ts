@@ -8,7 +8,7 @@
  * - Max 10 notes, min 2 notes
  */
 
-import { OCTAVE_4_NOTES, playNote } from "../audio.js";
+import { OCTAVE_4_NOTES, playNote, isPlaying } from "../audio.js";
 import {
   checkDifficultyAdjustment,
   DifficultyState,
@@ -438,7 +438,11 @@ function renderFeedback(): void {
 
 function setupEventListeners(): void {
   const playBtn = document.getElementById("play-btn")!;
-  playBtn.addEventListener("click", playCurrentNote);
+  playBtn.addEventListener("click", () => {
+    if (!isPlaying()) {
+      playCurrentNote();
+    }
+  });
 
   const doneBtn = document.getElementById("done-btn")!;
   doneBtn.addEventListener("click", () => {
@@ -456,7 +460,7 @@ function setupEventListeners(): void {
     // Space to replay note
     if (e.key === " ") {
       e.preventDefault();
-      if (!state.hasAnswered) {
+      if (!state.hasAnswered && !isPlaying()) {
         playCurrentNote();
       }
       return;

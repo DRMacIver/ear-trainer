@@ -5,7 +5,7 @@
  * User identifies which one is the C.
  */
 
-import { playNote, ALL_NOTES } from "../audio.js";
+import { playNote, ALL_NOTES, isPlaying } from "../audio.js";
 import {
   HistoryEntry,
   renderHistorySummary,
@@ -281,7 +281,7 @@ function renderFeedback(): void {
 function setupEventListeners(): void {
   const playBtn = document.getElementById("play-btn")!;
   playBtn.addEventListener("click", () => {
-    if (!state.hasAnswered) {
+    if (!state.hasAnswered && !isPlaying()) {
       playBothNotes();
     }
   });
@@ -299,7 +299,7 @@ function setupEventListeners(): void {
   keyboardHandler = (e: KeyboardEvent) => {
     if (e.key === " ") {
       e.preventDefault();
-      if (!state.hasAnswered) {
+      if (!state.hasAnswered && !isPlaying()) {
         playBothNotes();
       }
       return;

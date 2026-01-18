@@ -5,7 +5,7 @@
  * one is a different note. User identifies which is the odd one.
  */
 
-import { playNote, shuffle, getChromaticIndex, NOTE_FREQUENCIES } from "../audio.js";
+import { playNote, shuffle, getChromaticIndex, NOTE_FREQUENCIES, isPlaying } from "../audio.js";
 import {
   HistoryEntry,
   renderHistorySummary,
@@ -339,7 +339,7 @@ function renderFeedback(): void {
 function setupEventListeners(): void {
   const playBtn = document.getElementById("play-btn")!;
   playBtn.addEventListener("click", () => {
-    if (!state.hasAnswered) {
+    if (!state.hasAnswered && !isPlaying()) {
       playAllNotes();
     }
   });
@@ -357,7 +357,7 @@ function setupEventListeners(): void {
   keyboardHandler = (e: KeyboardEvent) => {
     if (e.key === " ") {
       e.preventDefault();
-      if (!state.hasAnswered) {
+      if (!state.hasAnswered && !isPlaying()) {
         playAllNotes();
       }
       return;
