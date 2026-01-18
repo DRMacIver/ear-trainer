@@ -9,7 +9,7 @@ import { playNote, shuffle, getChromaticIndex } from "../audio.js";
 
 const NOTE_DURATION = 0.6;
 const NOTE_GAP = 0.3;
-const WRONG_ANSWER_DELAY = 1000;
+const WRONG_ANSWER_DELAY = 2000;
 const CORRECT_FLASH_DELAY = 300;
 
 // Available base notes (without octave)
