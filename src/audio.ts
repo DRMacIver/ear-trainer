@@ -52,20 +52,12 @@ export function getNotesForOctave(octave: number): string[] {
 }
 
 let audioContext: AudioContext | null = null;
-let activePlayCount = 0;
 
 function getAudioContext(): AudioContext {
   if (!audioContext) {
     audioContext = new AudioContext();
   }
   return audioContext;
-}
-
-/**
- * Check if any audio is currently playing.
- */
-export function isPlaying(): boolean {
-  return activePlayCount > 0;
 }
 
 export interface PlayOptions {
@@ -103,12 +95,8 @@ export function playFrequency(
   oscillator.start(now);
   oscillator.stop(now + duration);
 
-  activePlayCount++;
   return new Promise((resolve) => {
-    oscillator.onended = () => {
-      activePlayCount--;
-      resolve();
-    };
+    oscillator.onended = () => resolve();
   });
 }
 

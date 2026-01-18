@@ -4,7 +4,7 @@
  * Plays a single note and asks the user to identify which of two notes it is.
  */
 
-import { playNote, selectRandomNotes, isPlaying } from "../audio.js";
+import { playNote, selectRandomNotes } from "../audio.js";
 import {
   HistoryEntry,
   renderHistorySummary,
@@ -115,11 +115,7 @@ function renderChoiceButtons(): void {
 
 function setupEventListeners(): void {
   const playBtn = document.getElementById("play-btn")!;
-  playBtn.addEventListener("click", () => {
-    if (!isPlaying()) {
-      playCurrentNote();
-    }
-  });
+  playBtn.addEventListener("click", playCurrentNote);
 
   const doneBtn = document.getElementById("done-btn")!;
   doneBtn.addEventListener("click", () => {
