@@ -728,3 +728,70 @@ a:hover {
 .review-incorrect .review-result {
   color: #e57373;
 }
+
+/* Frequency Range Exercise */
+.freq-scale-container {
+  margin: 2rem 0;
+}
+
+.freq-scale {
+  position: relative;
+  height: 60px;
+  background: linear-gradient(to right, #1a1a2e, #16213e, #1a1a2e);
+  border: 2px solid #333;
+  border-radius: 8px;
+  cursor: crosshair;
+  overflow: hidden;
+}
+
+.freq-bar {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: rgba(100, 181, 246, 0.3);
+  border-left: 3px solid #64b5f6;
+  border-right: 3px solid #64b5f6;
+  cursor: grab;
+  transition: left 0.05s ease-out;
+}
+
+.freq-bar:active {
+  cursor: grabbing;
+}
+
+.freq-marker {
+  position: absolute;
+  top: 0;
+  width: 3px;
+  height: 100%;
+  transform: translateX(-50%);
+}
+
+.freq-marker.current {
+  background: #4caf50;
+  box-shadow: 0 0 10px rgba(76, 175, 80, 0.8);
+}
+
+.freq-marker.history {
+  background: #ff9800;
+}
+
+.freq-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.5rem;
+  color: #888;
+  font-size: 0.85rem;
+}
+
+.freq-info {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 1rem;
+  color: #aaa;
+  font-size: 0.9rem;
+}
+
+.freq-level {
+  color: #64b5f6;
+}

@@ -79,5 +79,18 @@ export function renderIndex(): void {
         </a>
       </li>
     </ul>
+
+    <h2>Frequency Exercises</h2>
+    <ul class="exercise-list">
+      <li>
+        <a href="#/exercises/frequency-range">
+          <div class="title">Frequency Range</div>
+          <div class="description">
+            A tone plays - place your range bar on the log scale to estimate where
+            the frequency is. Difficulty increases as the bar gets narrower.
+          </div>
+        </a>
+      </li>
+    </ul>
   `;
 }

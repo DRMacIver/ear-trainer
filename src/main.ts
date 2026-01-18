@@ -10,6 +10,7 @@ import { renderProgressiveId } from "./pages/progressive-id.js";
 import { renderOddOneOut } from "./pages/odd-one-out.js";
 import { renderSpotTheC } from "./pages/spot-the-c.js";
 import { renderOctaveOrNot } from "./pages/octave-or-not.js";
+import { renderFrequencyRange } from "./pages/frequency-range.js";
 
 type Route = () => void | Promise<void>;
 
@@ -23,6 +24,7 @@ const routes: Record<string, Route> = {
   "#/exercises/odd-one-out": renderOddOneOut,
   "#/exercises/spot-the-c": renderSpotTheC,
   "#/exercises/octave-or-not": renderOctaveOrNot,
+  "#/exercises/frequency-range": renderFrequencyRange,
 };
 
 function router(): void {
