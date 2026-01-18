@@ -40,6 +40,8 @@ interface HistoryMarker {
   frequency: number;
   logPos: number; // 0-1 position on scale
   age: number; // How many rounds ago (0 = current)
+  result: 'correct' | 'low' | 'high'; // Whether freq was within range, below it, or above it
+  guessPosition: number; // Where the user's bar was centered (0-1)
 }
 
 interface ExerciseState {
@@ -106,19 +108,29 @@ function initExercise(): void {
   };
 }
 
-function isFrequencyInRange(): boolean {
+const AUTO_ADVANCE_DELAY = 1000;
+
+function getFrequencyResult(): 'correct' | 'low' | 'high' {
   const barHalfWidth = getBarWidth() / 2 / LOG_RANGE;
   const freqLogPos = freqToLogPosition(state.currentFrequency);
   const minPos = state.selectedPosition - barHalfWidth;
   const maxPos = state.selectedPosition + barHalfWidth;
-  return freqLogPos >= minPos && freqLogPos <= maxPos;
+
+  if (freqLogPos >= minPos && freqLogPos <= maxPos) {
+    return 'correct';
+  } else if (freqLogPos < minPos) {
+    return 'low'; // Actual frequency was lower than the guess range
+  } else {
+    return 'high'; // Actual frequency was higher than the guess range
+  }
 }
 
 function handleSubmit(): void {
   if (state.hasAnswered || !state.inputEnabled) return;
 
   state.hasAnswered = true;
-  state.wasCorrect = isFrequencyInRange();
+  const result = getFrequencyResult();
+  state.wasCorrect = result === 'correct';
   state.totalAttempts++;
 
   // Add to history
@@ -126,6 +138,8 @@ function handleSubmit(): void {
     frequency: state.currentFrequency,
     logPos: freqToLogPosition(state.currentFrequency),
     age: 0,
+    result,
+    guessPosition: state.selectedPosition,
   });
 
   // Age existing markers and remove old ones
@@ -153,6 +167,9 @@ function handleSubmit(): void {
   };
 
   render();
+
+  // Auto-advance after delay
+  setTimeout(advanceToNext, AUTO_ADVANCE_DELAY);
 }
 
 function advanceToNext(): void {
@@ -193,12 +210,12 @@ function render(): void {
   app.innerHTML = `
     <a href="#/" class="back-link">&larr; Back to exercises</a>
     <h1>Frequency Range</h1>
-    <p>A tone plays. Drag the bar to where you think the frequency is. Press <strong>Enter</strong> or click <strong>Submit</strong> to check.</p>
+    <p>A tone plays. Drag the bar to where you think the frequency is. Press <strong>Space</strong> to check, <strong>R</strong> to replay.</p>
 
     <div class="exercise-container">
       <div class="controls">
         <button class="play-again-btn" id="play-btn">Play Again</button>
-        ${state.hasAnswered ? `<button class="next-button" id="next-btn">Next</button>` : `<button class="check-button" id="submit-btn">Submit</button>`}
+        ${!state.hasAnswered ? `<button class="check-button" id="submit-btn">Submit</button>` : ''}
       </div>
 
       <div class="freq-scale-container">
@@ -248,7 +265,8 @@ function renderHistoryMarkers(): string {
     .filter((m) => m.age > 0) // Don't show current round's marker twice
     .map((m) => {
       const opacity = Math.max(0.1, 1 - (m.age / 10));
-      return `<div class="freq-marker history" style="left: ${m.logPos * 100}%; opacity: ${opacity}"></div>`;
+      const colorClass = m.result === 'correct' ? 'correct' : m.result === 'low' ? 'low' : 'high';
+      return `<div class="freq-marker history ${colorClass}" style="left: ${m.logPos * 100}%; opacity: ${opacity}"></div>`;
     })
     .join('');
 }
@@ -264,10 +282,10 @@ function renderFeedback(): void {
 
   const freqStr = formatFrequency(state.currentFrequency);
   if (state.wasCorrect) {
-    feedback.className = "feedback success";
+    feedback.className = "feedback success fade-out";
     feedback.textContent = `Correct! The frequency was ${freqStr}.`;
   } else {
-    feedback.className = "feedback error";
+    feedback.className = "feedback error fade-out";
     feedback.textContent = `Wrong! The frequency was ${freqStr}.`;
   }
 }
@@ -282,9 +300,6 @@ function setupEventListeners(): void {
 
   const submitBtn = document.getElementById("submit-btn");
   submitBtn?.addEventListener("click", handleSubmit);
-
-  const nextBtn = document.getElementById("next-btn");
-  nextBtn?.addEventListener("click", advanceToNext);
 
   // Set up dragging on the scale
   const scale = document.getElementById("freq-scale");
@@ -353,14 +368,12 @@ function setupEventListeners(): void {
   }
 
   keyboardHandler = (e: KeyboardEvent) => {
-    if (e.key === "Enter") {
+    if (e.key === " " || e.key === "Enter") {
       e.preventDefault();
-      if (state.hasAnswered) {
-        advanceToNext();
-      } else {
+      if (!state.hasAnswered) {
         handleSubmit();
       }
-    } else if (e.key === " ") {
+    } else if (e.key === "r" || e.key === "R") {
       e.preventDefault();
       if (!state.hasAnswered) {
         playCurrentFrequency();

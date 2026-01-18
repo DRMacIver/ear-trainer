@@ -227,6 +227,16 @@ a:hover {
   color: #e57373;
 }
 
+.feedback.fade-out {
+  animation: feedback-fade 1s ease-out forwards;
+}
+
+@keyframes feedback-fade {
+  0% { opacity: 1; }
+  70% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
 .back-link {
   display: inline-block;
   margin-bottom: 1rem;
@@ -774,6 +784,18 @@ a:hover {
 
 .freq-marker.history {
   background: #ff9800;
+}
+
+.freq-marker.history.correct {
+  background: #4caf50; /* Green - correct guess */
+}
+
+.freq-marker.history.low {
+  background: #f44336; /* Red - actual frequency was lower than guess */
+}
+
+.freq-marker.history.high {
+  background: #2196f3; /* Blue - actual frequency was higher than guess */
 }
 
 .freq-labels {
