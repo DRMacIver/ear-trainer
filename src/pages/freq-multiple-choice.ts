@@ -10,7 +10,7 @@
  */
 
 import { playFrequency } from "../audio.js";
-import { loadDifficulty, saveDifficulty } from "../lib/storage.js";
+import { loadVersionedDifficulty, saveVersionedDifficulty } from "../lib/storage.js";
 
 const MIN_FREQ = 128;
 const MAX_FREQ = 1024;
@@ -26,28 +26,34 @@ const AUTO_ADVANCE_DELAY = 1000;
 const MIN_LEVEL = 1;
 const MAX_LEVEL = 8;
 
+// Version: increment this when difficulty parameters change significantly
+// This will reset saved difficulty for all users
+const EXERCISE_VERSION = 2;
+
 // Number of choices at each level
+// Quick progression to 3 choices, stay there while tightening separation
 const CHOICES_BY_LEVEL: Record<number, number> = {
   1: 2,
-  2: 2,
+  2: 3,
   3: 3,
   4: 3,
-  5: 4,
+  5: 3,
   6: 4,
-  7: 5,
+  7: 4,
   8: 5,
 };
 
 // Minimum separation in octaves between choices at each level
+// Start with reasonable separation, not too wide
 const SEPARATION_BY_LEVEL: Record<number, number> = {
-  1: 0.5, // Half octave apart
-  2: 0.35, // ~4 semitones
-  3: 0.3, // ~3.6 semitones
-  4: 0.25, // 3 semitones
-  5: 0.2, // ~2.4 semitones
-  6: 0.15, // ~1.8 semitones
-  7: 0.12, // ~1.4 semitones
-  8: 0.1, // ~1.2 semitones
+  1: 0.3, // ~3.6 semitones - easier start
+  2: 0.35, // ~4 semitones - more choices but well separated
+  3: 0.25, // 3 semitones
+  4: 0.2, // ~2.4 semitones
+  5: 0.15, // ~1.8 semitones - tight 3-choice
+  6: 0.2, // ~2.4 semitones - 4 choices, moderate separation
+  7: 0.15, // ~1.8 semitones
+  8: 0.12, // ~1.4 semitones - hardest
 };
 
 // EMA-based difficulty adjustment
@@ -153,7 +159,11 @@ function generateChoices(
 }
 
 function initExercise(): void {
-  const savedLevel = loadDifficulty("freq-multiple-choice", MIN_LEVEL);
+  const savedLevel = loadVersionedDifficulty(
+    "freq-multiple-choice",
+    MIN_LEVEL,
+    EXERCISE_VERSION
+  );
   const level = Math.max(
     MIN_LEVEL,
     Math.min(MAX_LEVEL, Math.round(savedLevel))
@@ -207,7 +217,7 @@ function applyDifficultyAdjustment(wasCorrect: boolean): void {
   }
 
   state.level = newLevel;
-  saveDifficulty("freq-multiple-choice", state.level);
+  saveVersionedDifficulty("freq-multiple-choice", state.level, EXERCISE_VERSION);
 }
 
 function handleAnswer(chosenIndex: number): void {
