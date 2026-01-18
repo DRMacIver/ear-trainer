@@ -8,6 +8,8 @@
 export interface HistoryEntry {
   // What was played/shown (e.g., "C4", "C3 -> C4", "C3, E4, C5")
   prompt: string;
+  // The actual notes to replay (in order)
+  notes: string[];
   // What the user answered
   userAnswer: string;
   // What the correct answer was
@@ -34,7 +36,10 @@ export function renderHistorySummary(
       return `
         <tr class="${rowClass}">
           <td>${idx + 1}</td>
-          <td>${escapeHtml(entry.prompt)}</td>
+          <td>
+            <button class="history-play-btn" data-index="${idx}" title="Play">&#9654;</button>
+            ${escapeHtml(entry.prompt)}
+          </td>
           <td>${escapeHtml(entry.userAnswer)}</td>
           <td>${escapeHtml(entry.correctAnswer)}</td>
           <td>${icon}</td>
@@ -89,6 +94,125 @@ export function setupHistoryBackButton(onBack: () => void): void {
   if (backBtn) {
     backBtn.addEventListener("click", onBack);
   }
+}
+
+/**
+ * Set up play buttons for history entries.
+ * Opens a review overlay when clicked.
+ */
+export function setupHistoryPlayButtons(
+  history: HistoryEntry[],
+  playNotes: (notes: string[]) => Promise<void>
+): void {
+  const buttons = document.querySelectorAll(".history-play-btn");
+  buttons.forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const target = e.currentTarget as HTMLButtonElement;
+      const index = parseInt(target.dataset.index || "0", 10);
+      const entry = history[index];
+      if (entry) {
+        showReviewOverlay(entry, playNotes);
+      }
+    });
+  });
+}
+
+/**
+ * Show a review overlay for a history entry.
+ */
+function showReviewOverlay(
+  entry: HistoryEntry,
+  playNotes: (notes: string[]) => Promise<void>
+): void {
+  // Remove any existing overlay
+  const existing = document.getElementById("review-overlay");
+  if (existing) existing.remove();
+
+  const overlay = document.createElement("div");
+  overlay.id = "review-overlay";
+  overlay.className = "review-overlay";
+
+  const noteButtons = entry.notes
+    .map(
+      (_, i) =>
+        `<button class="review-sound-btn" data-index="${i}">Sound ${i + 1}</button>`
+    )
+    .join("");
+
+  const resultIcon = entry.correct ? "&#x2714;" : "&#x2718;";
+  const resultClass = entry.correct ? "review-correct" : "review-incorrect";
+
+  overlay.innerHTML = `
+    <div class="review-modal">
+      <button class="review-close-btn" title="Close">&times;</button>
+      <h3>Review Problem</h3>
+
+      <div class="review-sounds">
+        ${noteButtons}
+        <button class="review-play-all-btn">Play All</button>
+      </div>
+
+      <div class="review-details">
+        <div class="review-row">
+          <span class="review-label">Played:</span>
+          <span>${escapeHtml(entry.prompt)}</span>
+        </div>
+        <div class="review-row">
+          <span class="review-label">You answered:</span>
+          <span>${escapeHtml(entry.userAnswer)}</span>
+        </div>
+        <div class="review-row">
+          <span class="review-label">Correct answer:</span>
+          <span>${escapeHtml(entry.correctAnswer)}</span>
+        </div>
+        <div class="review-row ${resultClass}">
+          <span class="review-result">${resultIcon} ${entry.correct ? "Correct" : "Incorrect"}</span>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  // Set up event listeners
+  const closeBtn = overlay.querySelector(".review-close-btn");
+  closeBtn?.addEventListener("click", () => overlay.remove());
+
+  // Close on overlay background click
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) overlay.remove();
+  });
+
+  // Close on Escape key
+  const escHandler = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      overlay.remove();
+      document.removeEventListener("keydown", escHandler);
+    }
+  };
+  document.addEventListener("keydown", escHandler);
+
+  // Play individual notes
+  const soundBtns = overlay.querySelectorAll(".review-sound-btn");
+  soundBtns.forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const idx = parseInt((btn as HTMLButtonElement).dataset.index || "0", 10);
+      const allBtns = overlay.querySelectorAll("button");
+      allBtns.forEach((b) => ((b as HTMLButtonElement).disabled = true));
+      await playNotes([entry.notes[idx]]);
+      allBtns.forEach((b) => ((b as HTMLButtonElement).disabled = false));
+    });
+  });
+
+  // Play all notes
+  const playAllBtn = overlay.querySelector(".review-play-all-btn");
+  playAllBtn?.addEventListener("click", async () => {
+    const allBtns = overlay.querySelectorAll("button");
+    allBtns.forEach((b) => ((b as HTMLButtonElement).disabled = true));
+    await playNotes(entry.notes);
+    allBtns.forEach((b) => ((b as HTMLButtonElement).disabled = false));
+  });
 }
 
 function escapeHtml(text: string): string {

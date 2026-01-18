@@ -578,3 +578,153 @@ a:hover {
 .done-button:hover {
   background: #ffa726;
 }
+
+.history-play-btn {
+  background: #0f3460;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 0.25rem 0.5rem;
+  margin-right: 0.5rem;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: background 0.2s;
+}
+
+.history-play-btn:hover {
+  background: #1a4f8a;
+}
+
+.history-play-btn:disabled {
+  background: #555;
+  cursor: not-allowed;
+}
+
+/* Review Overlay */
+.review-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.review-modal {
+  background: #1a1a2e;
+  border-radius: 12px;
+  padding: 2rem;
+  max-width: 500px;
+  width: 90%;
+  position: relative;
+  border: 1px solid #333;
+}
+
+.review-close-btn {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  background: none;
+  border: none;
+  color: #aaa;
+  font-size: 1.5rem;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  line-height: 1;
+}
+
+.review-close-btn:hover {
+  color: #fff;
+}
+
+.review-modal h3 {
+  margin: 0 0 1.5rem 0;
+  color: #fff;
+}
+
+.review-sounds {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.5rem;
+}
+
+.review-sound-btn {
+  padding: 1rem 1.5rem;
+  font-size: 1.1rem;
+  font-weight: bold;
+  background: #16213e;
+  color: #fff;
+  border: 2px solid #333;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.review-sound-btn:hover {
+  background: #1f3460;
+  border-color: #64b5f6;
+}
+
+.review-sound-btn:disabled {
+  background: #555;
+  cursor: not-allowed;
+}
+
+.review-play-all-btn {
+  padding: 1rem 1.5rem;
+  font-size: 1rem;
+  background: #0f3460;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.review-play-all-btn:hover {
+  background: #1a4f8a;
+}
+
+.review-play-all-btn:disabled {
+  background: #555;
+  cursor: not-allowed;
+}
+
+.review-details {
+  background: #16213e;
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.review-row {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #333;
+}
+
+.review-row:last-child {
+  border-bottom: none;
+}
+
+.review-label {
+  color: #aaa;
+  min-width: 120px;
+}
+
+.review-result {
+  font-weight: bold;
+}
+
+.review-correct .review-result {
+  color: #81c784;
+}
+
+.review-incorrect .review-result {
+  color: #e57373;
+}

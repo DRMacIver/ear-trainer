@@ -16,6 +16,7 @@ import {
   HistoryEntry,
   renderHistorySummary,
   setupHistoryBackButton,
+  setupHistoryPlayButtons,
 } from "../lib/history.js";
 
 const NOTE_DURATION = 0.6;
@@ -225,6 +226,7 @@ function handleAnswer(saidOctave: boolean): void {
   const intervalName = getIntervalName(state.interval);
   state.history.push({
     prompt: `${state.notes[0]} → ${state.notes[1]}`,
+    notes: [...state.notes],
     userAnswer: saidOctave ? "Yes (Octave)" : "No (Not octave)",
     correctAnswer: state.isOctave ? `Yes (${intervalName})` : `No (${intervalName})`,
     correct: state.wasCorrect,
@@ -289,6 +291,12 @@ function render(): void {
       state.showingHistory = false;
       render();
       playBothNotes();
+    });
+    setupHistoryPlayButtons(state.history, async (notes) => {
+      for (let i = 0; i < notes.length; i++) {
+        await playNote(notes[i], { duration: NOTE_DURATION });
+        if (i < notes.length - 1) await sleep(NOTE_GAP * 1000);
+      }
     });
     return;
   }

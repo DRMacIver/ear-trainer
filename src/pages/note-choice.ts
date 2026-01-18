@@ -9,7 +9,10 @@ import {
   HistoryEntry,
   renderHistorySummary,
   setupHistoryBackButton,
+  setupHistoryPlayButtons,
 } from "../lib/history.js";
+
+const NOTE_DURATION = 0.8;
 
 interface ExerciseState {
   // The two notes to choose between
@@ -57,6 +60,9 @@ function render(): void {
       state.showingHistory = false;
       render();
       playCurrentNote();
+    });
+    setupHistoryPlayButtons(state.history, async (notes) => {
+      await playNote(notes[0], { duration: NOTE_DURATION });
     });
     return;
   }
@@ -156,7 +162,7 @@ function setupEventListeners(): void {
 
 function playCurrentNote(): void {
   const correctNote = state.choices[state.correctIndex];
-  playNote(correctNote, { duration: 0.8 });
+  playNote(correctNote, { duration: NOTE_DURATION });
 }
 
 function nextExercise(): void {
@@ -180,6 +186,7 @@ function handleChoice(chosenIndex: number): void {
   const chosenNote = state.choices[chosenIndex];
   state.history.push({
     prompt: correctNote,
+    notes: [correctNote],
     userAnswer: chosenNote,
     correctAnswer: correctNote,
     correct: state.wasCorrect,

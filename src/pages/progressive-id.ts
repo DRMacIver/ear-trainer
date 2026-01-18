@@ -18,6 +18,7 @@ import {
   HistoryEntry,
   renderHistorySummary,
   setupHistoryBackButton,
+  setupHistoryPlayButtons,
 } from "../lib/history.js";
 
 const MIN_NOTES = 2;
@@ -291,6 +292,7 @@ function handleAnswer(chosenIdx: number): void {
   const chosenNote = OCTAVE_4_NOTES[state.noteIndices[chosenIdx]];
   state.history.push({
     prompt: correctNote,
+    notes: [correctNote],
     userAnswer: chosenNote,
     correctAnswer: correctNote,
     correct: state.wasCorrect,
@@ -330,6 +332,9 @@ function render(): void {
       state.showingHistory = false;
       render();
       playCurrentNote();
+    });
+    setupHistoryPlayButtons(state.history, async (notes) => {
+      await playNote(notes[0], { duration: NOTE_DURATION });
     });
     return;
   }
