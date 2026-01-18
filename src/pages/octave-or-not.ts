@@ -265,7 +265,7 @@ function render(): void {
     <a href="#/" class="back-link">&larr; Back to exercises</a>
     <h1>Octave or Not</h1>
     <p>Two notes play (low then high). <strong>Are they an octave apart?</strong></p>
-    <p>Use <strong>Y/N</strong> keys, <strong>Left/Right</strong> arrows, or click. Press <strong>Space</strong> to replay.</p>
+    <p>Use <strong>Left/N</strong> for No, <strong>Right/Y</strong> for Yes, or click. Press <strong>Space</strong> to replay.</p>
 
     <div class="exercise-container">
       <div class="controls">
@@ -308,23 +308,10 @@ function render(): void {
 function renderChoiceButtons(): void {
   const container = document.getElementById("choice-buttons")!;
 
-  // "Yes" button
-  const yesBtn = document.createElement("button");
-  yesBtn.className = "note-choice-btn";
-  yesBtn.textContent = "Yes (Octave)";
-  if (state.hasAnswered) {
-    if (state.isOctave) {
-      yesBtn.classList.add("correct");
-    } else if (state.userSaidOctave === true) {
-      yesBtn.classList.add("incorrect");
-    }
-  }
-  yesBtn.addEventListener("click", () => handleAnswer(true));
-
-  // "No" button
+  // "No" button (left)
   const noBtn = document.createElement("button");
   noBtn.className = "note-choice-btn";
-  noBtn.textContent = "No (Not Octave)";
+  noBtn.textContent = "No";
   if (state.hasAnswered) {
     if (!state.isOctave) {
       noBtn.classList.add("correct");
@@ -334,8 +321,21 @@ function renderChoiceButtons(): void {
   }
   noBtn.addEventListener("click", () => handleAnswer(false));
 
-  container.appendChild(yesBtn);
+  // "Yes" button (right)
+  const yesBtn = document.createElement("button");
+  yesBtn.className = "note-choice-btn";
+  yesBtn.textContent = "Yes";
+  if (state.hasAnswered) {
+    if (state.isOctave) {
+      yesBtn.classList.add("correct");
+    } else if (state.userSaidOctave === true) {
+      yesBtn.classList.add("incorrect");
+    }
+  }
+  yesBtn.addEventListener("click", () => handleAnswer(true));
+
   container.appendChild(noBtn);
+  container.appendChild(yesBtn);
 }
 
 function renderFeedback(): void {
@@ -379,17 +379,17 @@ function setupEventListeners(): void {
       return;
     }
 
-    // Y or Left = Yes (octave)
-    if (e.key === "y" || e.key === "Y" || e.key === "ArrowLeft") {
+    // Left or N = No (not octave)
+    if (e.key === "ArrowLeft" || e.key === "n" || e.key === "N") {
       e.preventDefault();
-      handleAnswer(true);
+      handleAnswer(false);
       return;
     }
 
-    // N or Right = No (not octave)
-    if (e.key === "n" || e.key === "N" || e.key === "ArrowRight") {
+    // Right or Y = Yes (octave)
+    if (e.key === "ArrowRight" || e.key === "y" || e.key === "Y") {
       e.preventDefault();
-      handleAnswer(false);
+      handleAnswer(true);
     }
   };
 
