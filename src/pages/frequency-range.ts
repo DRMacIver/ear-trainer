@@ -4,14 +4,13 @@
  * A sound plays between 128Hz and 1024Hz. The user places a range bar
  * on a log scale to estimate where the frequency is. After answering,
  * the true frequency is shown. Past frequencies fade over time.
+ *
+ * Difficulty adapts dynamically: the bar width is set so that 85% of
+ * historical guesses (with exponential decay weighting) would have been
+ * correct. First 5 rounds use a fixed 2:1 ratio (1 octave) to gather data.
  */
 
 import { playFrequency } from "../audio.js";
-import {
-  checkDifficultyAdjustment,
-  createDifficultyState,
-  DifficultyState,
-} from "../lib/difficulty.js";
 
 const MIN_FREQ = 128;
 const MAX_FREQ = 1024;
@@ -20,21 +19,16 @@ const LOG_MAX = Math.log2(MAX_FREQ); // 10
 const LOG_RANGE = LOG_MAX - LOG_MIN; // 3
 
 const NOTE_DURATION = 0.8;
-const MIN_LEVEL = 1;
-const MAX_LEVEL = 8;
 
-// Bar width in log2 units at each level (wider = easier)
-// Level 1: 1.0 octaves wide, Level 8: 0.25 octaves wide
-const BAR_WIDTHS: Record<number, number> = {
-  1: 1.0,
-  2: 0.85,
-  3: 0.7,
-  4: 0.55,
-  5: 0.45,
-  6: 0.35,
-  7: 0.3,
-  8: 0.25,
-};
+// Adaptive difficulty parameters
+const INITIAL_BAR_WIDTH = 1.0; // 1 octave = 2:1 ratio
+const MIN_BAR_WIDTH = 0.1; // Minimum ~1.07:1 ratio (very hard)
+const MAX_BAR_WIDTH = 1.5; // Maximum ~2.83:1 ratio (very easy)
+const WARMUP_ROUNDS = 5; // Use fixed width for first N rounds
+const TARGET_SUCCESS_RATE = 0.85; // Aim for 85% success
+const DECAY_FACTOR = 0.97; // Weight decay per round (gradual)
+const MAX_SHRINK_RATE = 0.9; // Can shrink by at most 10% per round
+const MAX_GROW_RATE = 1.2; // Can grow by at most 20% per round
 
 interface HistoryMarker {
   frequency: number;
@@ -53,13 +47,13 @@ interface ExerciseState {
   hasAnswered: boolean;
   // Was the answer correct (frequency within bar)
   wasCorrect: boolean | null;
-  // Difficulty tracking
-  difficulty: DifficultyState;
+  // Current bar width in octaves (log2 units)
+  barWidth: number;
   // Stats
   totalCorrect: number;
   totalAttempts: number;
   streak: number;
-  // History of played frequencies
+  // History of played frequencies (kept longer for adaptive difficulty)
   history: HistoryMarker[];
   // Whether input is enabled
   inputEnabled: boolean;
@@ -79,7 +73,7 @@ function logPositionToFreq(pos: number): number {
 }
 
 function getBarWidth(): number {
-  return BAR_WIDTHS[state.difficulty.level] || BAR_WIDTHS[MAX_LEVEL];
+  return state.barWidth;
 }
 
 function getBarWidthPercent(): number {
@@ -98,7 +92,7 @@ function initExercise(): void {
     selectedPosition: 0.5,
     hasAnswered: false,
     wasCorrect: null,
-    difficulty: createDifficultyState(1),
+    barWidth: INITIAL_BAR_WIDTH,
     totalCorrect: 0,
     totalAttempts: 0,
     streak: 0,
@@ -125,6 +119,60 @@ function getFrequencyResult(): 'correct' | 'low' | 'high' {
   }
 }
 
+/**
+ * Calculate the optimal bar width based on historical performance.
+ * Finds the width such that TARGET_SUCCESS_RATE of weighted historical
+ * guesses would have been correct.
+ */
+function calculateAdaptiveBarWidth(): number {
+  // Don't adapt during warmup period
+  if (state.history.length < WARMUP_ROUNDS) {
+    return INITIAL_BAR_WIDTH;
+  }
+
+  // Calculate error (distance from guess center to actual) for each historical entry
+  // Error is in log position units (0-1 scale), convert to octaves
+  const weightedErrors: { error: number; weight: number }[] = state.history.map((h, index) => ({
+    // Error in octaves: how far the actual frequency was from the guess center
+    error: Math.abs(h.guessPosition - h.logPos) * LOG_RANGE,
+    // Exponential decay: older entries (higher index) get less weight
+    weight: Math.pow(DECAY_FACTOR, index),
+  }));
+
+  // Sort by error (smallest first)
+  weightedErrors.sort((a, b) => a.error - b.error);
+
+  // Find the error at the target percentile (weighted)
+  const totalWeight = weightedErrors.reduce((sum, e) => sum + e.weight, 0);
+  const targetWeight = TARGET_SUCCESS_RATE * totalWeight;
+
+  let cumulativeWeight = 0;
+  let percentileError = 0;
+
+  for (const entry of weightedErrors) {
+    cumulativeWeight += entry.weight;
+    percentileError = entry.error;
+    if (cumulativeWeight >= targetWeight) {
+      break;
+    }
+  }
+
+  // The bar width needed is 2x the error (error is distance from center,
+  // bar extends that distance in both directions)
+  const targetWidth = 2 * percentileError;
+
+  // Apply rate limits: can't shrink more than 10% or grow more than 20%
+  const currentWidth = state.barWidth;
+  const minNewWidth = currentWidth * MAX_SHRINK_RATE;
+  const maxNewWidth = currentWidth * MAX_GROW_RATE;
+
+  // Clamp to rate limits, then to absolute bounds
+  let newWidth = Math.max(minNewWidth, Math.min(maxNewWidth, targetWidth));
+  newWidth = Math.max(MIN_BAR_WIDTH, Math.min(MAX_BAR_WIDTH, newWidth));
+
+  return newWidth;
+}
+
 function handleSubmit(): void {
   if (state.hasAnswered || !state.inputEnabled) return;
 
@@ -133,7 +181,7 @@ function handleSubmit(): void {
   state.wasCorrect = result === 'correct';
   state.totalAttempts++;
 
-  // Add to history
+  // Add to history (newest first)
   state.history.unshift({
     frequency: state.currentFrequency,
     logPos: freqToLogPosition(state.currentFrequency),
@@ -142,10 +190,11 @@ function handleSubmit(): void {
     guessPosition: state.selectedPosition,
   });
 
-  // Age existing markers and remove old ones
-  state.history = state.history
-    .map((m) => ({ ...m, age: m.age + (m.age > 0 ? 0 : 1) }))
-    .filter((m) => m.age <= 10);
+  // Age markers for display (but keep all history for adaptive difficulty)
+  state.history = state.history.map((m, i) => ({
+    ...m,
+    age: i, // Age is just the index (0 = newest)
+  }));
 
   if (state.wasCorrect) {
     state.totalCorrect++;
@@ -154,17 +203,8 @@ function handleSubmit(): void {
     state.streak = 0;
   }
 
-  // Apply difficulty adjustment
-  const adjustment = checkDifficultyAdjustment(
-    state.difficulty,
-    state.wasCorrect,
-    MIN_LEVEL,
-    MAX_LEVEL
-  );
-  state.difficulty = {
-    level: adjustment.newLevel,
-    ema: adjustment.newEma,
-  };
+  // Apply adaptive difficulty adjustment
+  state.barWidth = calculateAdaptiveBarWidth();
 
   render();
 
@@ -173,11 +213,6 @@ function handleSubmit(): void {
 }
 
 function advanceToNext(): void {
-  // Age all markers
-  state.history = state.history
-    .map((m) => ({ ...m, age: m.age + 1 }))
-    .filter((m) => m.age <= 10);
-
   state.currentFrequency = pickRandomFrequency();
   state.hasAnswered = false;
   state.wasCorrect = null;
@@ -234,7 +269,7 @@ function render(): void {
 
       <div class="freq-info">
         <span>Your range: ${formatFrequency(minFreq)} - ${formatFrequency(maxFreq)}</span>
-        <span class="freq-level">Level ${state.difficulty.level} (${getBarWidth().toFixed(2)} octaves)</span>
+        <span class="freq-level">Range: ${Math.pow(2, state.barWidth).toFixed(2)}x</span>
       </div>
 
       <div id="feedback"></div>
@@ -262,7 +297,7 @@ function render(): void {
 
 function renderHistoryMarkers(): string {
   return state.history
-    .filter((m) => m.age > 0) // Don't show current round's marker twice
+    .filter((m) => m.age > 0 && m.age <= 10) // Show last 10, skip current
     .map((m) => {
       const opacity = Math.max(0.1, 1 - (m.age / 10));
       const colorClass = m.result === 'correct' ? 'correct' : m.result === 'low' ? 'low' : 'high';
