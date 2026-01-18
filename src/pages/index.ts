@@ -25,11 +25,29 @@ export function renderIndex(): void {
     <h2>Exercises</h2>
     <ul class="exercise-list">
       <li>
+        <a href="#/exercises/spot-the-c">
+          <div class="title">Spot the C</div>
+          <div class="description">
+            Two notes play - one is a C, one is not. Find the C!
+            A great starting point for learning to recognize a reference note.
+          </div>
+        </a>
+      </li>
+      <li>
         <a href="#/exercises/note-choice">
           <div class="title">Note Choice</div>
           <div class="description">
             A single note plays - identify which of two options it is.
             Great for beginners learning to distinguish between notes.
+          </div>
+        </a>
+      </li>
+      <li>
+        <a href="#/exercises/odd-one-out">
+          <div class="title">Odd One Out</div>
+          <div class="description">
+            Three notes play - two are the same note in different octaves, one is different.
+            Find the odd one! Trains octave recognition.
           </div>
         </a>
       </li>

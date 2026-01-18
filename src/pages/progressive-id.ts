@@ -46,11 +46,45 @@ interface ExerciseState {
 let state: ExerciseState;
 let keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
 
+// Sharp note indices: C#=1, D#=3, F#=6, G#=8, A#=10
+const SHARP_INDICES = [1, 3, 6, 8, 10];
+// Mapping from sharp index to its base note index
+const SHARP_TO_BASE: Record<number, number> = {
+  1: 0, // C# -> C
+  3: 2, // D# -> D
+  6: 5, // F# -> F
+  8: 7, // G# -> G
+  10: 9, // A# -> A
+};
+// Minimum notes before sharps can be introduced
+const MIN_NOTES_FOR_SHARPS = 5;
+
 /**
  * Get the semitone index for a note (0-11 within octave 4).
  */
 function getNoteIndex(note: string): number {
   return OCTAVE_4_NOTES.indexOf(note);
+}
+
+/**
+ * Check if a note index is a sharp.
+ */
+function isSharpNote(noteIdx: number): boolean {
+  return SHARP_INDICES.includes(noteIdx);
+}
+
+/**
+ * Check if a sharp note can be added given the current set.
+ * Rules: Must have at least MIN_NOTES_FOR_SHARPS notes AND the base note must be present.
+ */
+function canAddSharp(sharpIdx: number, existingIndices: number[]): boolean {
+  // Must have enough notes
+  if (existingIndices.length < MIN_NOTES_FOR_SHARPS) {
+    return false;
+  }
+  // Base note must be present
+  const baseIdx = SHARP_TO_BASE[sharpIdx];
+  return existingIndices.includes(baseIdx);
 }
 
 /**
@@ -64,13 +98,22 @@ function minDistanceToSet(noteIdx: number, setIndices: number[]): number {
 /**
  * Select a note that tends toward being well-differentiated from existing notes,
  * but with randomization. Uses distance-squared as weights for selection.
+ *
+ * Sharp notes (#) are only available when:
+ * - There are at least MIN_NOTES_FOR_SHARPS notes
+ * - The base note (e.g., C for C#) is already in the set
  */
 function selectDifferentiatedNote(existingIndices: number[]): number {
   const available: number[] = [];
   for (let i = 0; i < OCTAVE_4_NOTES.length; i++) {
-    if (!existingIndices.includes(i)) {
-      available.push(i);
+    if (existingIndices.includes(i)) continue;
+
+    // Check if this is a sharp that can't be added yet
+    if (isSharpNote(i) && !canAddSharp(i, existingIndices)) {
+      continue;
     }
+
+    available.push(i);
   }
 
   if (available.length === 0) return -1;

@@ -5,7 +5,7 @@
  * by dragging them to the correct positions.
  */
 
-import { playNote, selectRandomNotes, shuffle } from "../audio.js";
+import { playNote, selectWellSeparatedNotes, shuffle } from "../audio.js";
 
 const NOTE_DURATION = 0.5;
 const NOTE_GAP = 0.15;
@@ -30,7 +30,7 @@ let state: ExerciseState;
 const NOTE_COUNT = 3;
 
 function initExercise(): void {
-  const targetNotes = selectRandomNotes(NOTE_COUNT);
+  const targetNotes = selectWellSeparatedNotes(NOTE_COUNT);
   state = {
     targetNotes,
     assignments: new Array(NOTE_COUNT).fill(null),

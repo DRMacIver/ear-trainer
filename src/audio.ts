@@ -125,6 +125,62 @@ export function selectRandomNotes(
 }
 
 /**
+ * Get the chromatic index (0-11) of a note, ignoring octave.
+ * C=0, C#=1, D=2, etc.
+ */
+export function getChromaticIndex(note: string): number {
+  // Extract note name without octave
+  const noteName = note.replace(/\d+$/, "");
+  return NOTE_NAMES.indexOf(noteName);
+}
+
+/**
+ * Check if two notes are semitones (adjacent in chromatic scale).
+ * This considers wrapping (B and C are semitones).
+ */
+export function areSemitones(note1: string, note2: string): boolean {
+  const idx1 = getChromaticIndex(note1);
+  const idx2 = getChromaticIndex(note2);
+  const diff = Math.abs(idx1 - idx2);
+  return diff === 1 || diff === 11; // 11 handles B-C wrapping
+}
+
+/**
+ * Select n random notes ensuring no two are semitones of each other.
+ * By default, only uses octave 4 notes for exercises.
+ */
+export function selectWellSeparatedNotes(
+  count: number,
+  fromNotes: string[] = OCTAVE_4_NOTES
+): string[] {
+  const shuffled = shuffle([...fromNotes]);
+  const selected: string[] = [];
+
+  for (const note of shuffled) {
+    if (selected.length >= count) break;
+
+    // Check if this note is a semitone of any already selected
+    const isTooClose = selected.some((s) => areSemitones(note, s));
+    if (!isTooClose) {
+      selected.push(note);
+    }
+  }
+
+  // Fallback: if we couldn't find enough well-separated notes, just return what we have
+  // plus fill with remaining shuffled notes (shouldn't happen with 12 notes and count <= 6)
+  if (selected.length < count) {
+    for (const note of shuffled) {
+      if (selected.length >= count) break;
+      if (!selected.includes(note)) {
+        selected.push(note);
+      }
+    }
+  }
+
+  return selected;
+}
+
+/**
  * Shuffle an array (Fisher-Yates).
  */
 export function shuffle<T>(array: T[]): T[] {
