@@ -178,9 +178,26 @@ describe("getSemitoneDistance", () => {
 });
 
 describe("generateCardsForPair", () => {
-  it("generates 4 cards per pair", () => {
+  it("generates 6 cards per pair (2 same-octave + 4 different-octave)", () => {
     const cards = generateCardsForPair("C", "F");
-    expect(cards.length).toBe(4);
+    expect(cards.length).toBe(6);
+  });
+
+  it("generates 2 same-octave cards and 4 different-octave cards", () => {
+    const cards = generateCardsForPair("C", "F");
+    const sameOctave = cards.filter((c) => c.sameOctave);
+    const diffOctave = cards.filter((c) => !c.sameOctave);
+    expect(sameOctave.length).toBe(2);
+    expect(diffOctave.length).toBe(4);
+  });
+
+  it("same-octave cards are in octave 4", () => {
+    const cards = generateCardsForPair("C", "F");
+    const sameOctave = cards.filter((c) => c.sameOctave);
+    for (const card of sameOctave) {
+      expect(getOctave(card.noteA)).toBe(4);
+      expect(getOctave(card.noteB)).toBe(4);
+    }
   });
 
   it("all cards have same pair name", () => {
@@ -193,8 +210,8 @@ describe("generateCardsForPair", () => {
   it("cards have different orderings", () => {
     const cards = generateCardsForPair("C", "F");
     const firstNotes = cards.map((c) => getNoteFamily(c.noteA));
-    expect(firstNotes.filter((n) => n === "C").length).toBe(2);
-    expect(firstNotes.filter((n) => n === "F").length).toBe(2);
+    expect(firstNotes.filter((n) => n === "C").length).toBe(3);
+    expect(firstNotes.filter((n) => n === "F").length).toBe(3);
   });
 
   it("cards have various octave combinations", () => {
@@ -238,8 +255,8 @@ describe("loadState / saveState", () => {
 
   it("returns initial state when nothing saved", () => {
     const state = loadState();
-    // 66 pairs × 4 cards = 264 cards
-    expect(state.cards.length).toBe(264);
+    // 66 pairs × 6 cards = 396 cards
+    expect(state.cards.length).toBe(396);
     expect(state.history).toEqual([]);
     expect(state.sessionCount).toBe(0);
     expect(state.cards.every((c) => c.card === null)).toBe(true);
@@ -257,7 +274,7 @@ describe("loadState / saveState", () => {
   it("handles corrupted localStorage gracefully", () => {
     localStorageMock.setItem("ear-trainer:note-pair-memory-v1", "invalid json");
     const state = loadState();
-    expect(state.cards.length).toBe(264);
+    expect(state.cards.length).toBe(396);
   });
 });
 
@@ -541,13 +558,25 @@ describe("selectSessionCards", () => {
     localStorageMock.clear();
   });
 
-  it("first session introduces 2 initial pairs", () => {
+  it("first session introduces same-octave cards for 2 initial pairs", () => {
     const state = loadState();
     const session = selectSessionCards(state);
 
     expect(session.isFirstSession).toBe(true);
-    // 2 pairs × 4 cards = 8 cards
-    expect(session.newCards.length).toBe(8);
+    // 2 pairs × 2 same-octave cards = 4 cards
+    expect(session.newCards.length).toBe(4);
+    // All cards should be same-octave
+    expect(session.newCards.every((c) => c.sameOctave)).toBe(true);
+  });
+
+  it("first session cards are in octave 4", () => {
+    const state = loadState();
+    const session = selectSessionCards(state);
+
+    for (const card of session.newCards) {
+      expect(getOctave(card.noteA)).toBe(4);
+      expect(getOctave(card.noteB)).toBe(4);
+    }
   });
 
   it("first session includes C-F and D-G pairs", () => {
@@ -616,14 +645,14 @@ describe("getStats", () => {
     expect(stats.introducedPairs).toBe(0);
     expect(stats.totalPairs).toBe(66);
     expect(stats.introducedCards).toBe(0);
-    expect(stats.totalCards).toBe(264);
+    expect(stats.totalCards).toBe(396);
     expect(stats.sessionsCompleted).toBe(0);
     expect(stats.totalReviews).toBe(0);
   });
 
   it("tracks progress correctly", () => {
     let state = loadState();
-    // Introduce one pair
+    // Introduce one pair (all 6 cards)
     const cfCards = state.cards.filter((c) => c.pair === "C-F");
     for (const card of cfCards) {
       state = recordReview(state, card.id, Grade.GOOD);
@@ -632,8 +661,8 @@ describe("getStats", () => {
 
     const stats = getStats(state);
     expect(stats.introducedPairs).toBe(1);
-    expect(stats.introducedCards).toBe(4);
-    expect(stats.totalReviews).toBe(4);
+    expect(stats.introducedCards).toBe(6);
+    expect(stats.totalReviews).toBe(6);
     expect(stats.sessionsCompleted).toBe(1);
   });
 });
@@ -716,10 +745,11 @@ describe("session progression flow", () => {
   it("follows expected learning progression", () => {
     let state = loadState();
 
-    // First session
+    // First session: same-octave cards for 2 pairs
     let session = selectSessionCards(state);
     expect(session.isFirstSession).toBe(true);
-    expect(session.newCards.length).toBe(8); // 2 pairs × 4 cards
+    expect(session.newCards.length).toBe(4); // 2 pairs × 2 same-octave cards
+    expect(session.newCards.every((c) => c.sameOctave)).toBe(true);
 
     // Review the new cards
     for (const card of session.newCards) {
@@ -732,7 +762,7 @@ describe("session progression flow", () => {
     session = selectSessionCards(state);
     expect(session.isFirstSession).toBe(false);
     expect(session.reviewCards.length).toBeGreaterThan(0);
-    // Should have new cards (next pair)
+    // Should have new cards (next pair or different-octave cards)
     expect(session.newCards.length).toBeGreaterThan(0);
   });
 });

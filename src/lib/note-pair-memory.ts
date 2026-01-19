@@ -14,6 +14,7 @@ export interface NotePairCard {
   noteA: string; // First note to play, with octave (e.g., "C4")
   noteB: string; // Second note to play, with octave (e.g., "F3")
   pair: string; // Canonical pair name, sorted (e.g., "C-F")
+  sameOctave: boolean; // Whether both notes are in the same octave
   card: Card | null; // FSRS state
   lastReviewedAt: number | null;
   reviewCount: number;
@@ -114,7 +115,7 @@ export const INITIAL_PAIRS: [string, string][] = [
 ];
 
 /**
- * Generate 4 cards for a pair with different octave/ordering combinations.
+ * Generate 6 cards for a pair: 2 same-octave cards (introduced first) and 4 different-octave cards.
  */
 export function generateCardsForPair(
   familyA: string,
@@ -123,42 +124,64 @@ export function generateCardsForPair(
   const pair = getPairName(`${familyA}4`, `${familyB}4`);
 
   return [
-    // familyA first, different octaves
+    // Same-octave cards (introduced first)
+    {
+      id: `${familyA}4-${familyB}4`,
+      noteA: `${familyA}4`,
+      noteB: `${familyB}4`,
+      pair,
+      sameOctave: true,
+      card: null,
+      lastReviewedAt: null,
+      reviewCount: 0,
+    },
+    {
+      id: `${familyB}4-${familyA}4`,
+      noteA: `${familyB}4`,
+      noteB: `${familyA}4`,
+      pair,
+      sameOctave: true,
+      card: null,
+      lastReviewedAt: null,
+      reviewCount: 0,
+    },
+    // Different-octave cards (introduced later)
     {
       id: `${familyA}4-${familyB}3`,
       noteA: `${familyA}4`,
       noteB: `${familyB}3`,
       pair,
+      sameOctave: false,
       card: null,
       lastReviewedAt: null,
       reviewCount: 0,
     },
-    // familyB first, different octaves
     {
       id: `${familyB}3-${familyA}4`,
       noteA: `${familyB}3`,
       noteB: `${familyA}4`,
       pair,
+      sameOctave: false,
       card: null,
       lastReviewedAt: null,
       reviewCount: 0,
     },
-    // familyA first, different octave arrangement
     {
       id: `${familyA}3-${familyB}5`,
       noteA: `${familyA}3`,
       noteB: `${familyB}5`,
       pair,
+      sameOctave: false,
       card: null,
       lastReviewedAt: null,
       reviewCount: 0,
     },
-    // familyB first, different octave arrangement
     {
       id: `${familyB}5-${familyA}3`,
       noteA: `${familyB}5`,
       noteB: `${familyA}3`,
       pair,
+      sameOctave: false,
       card: null,
       lastReviewedAt: null,
       reviewCount: 0,
@@ -379,6 +402,50 @@ export function isSharpReadyForOtherPairs(
 }
 
 /**
+ * Check if same-octave cards for a pair are well-learned.
+ * Required before different-octave cards can be introduced.
+ */
+export function areSameOctaveCardsWellLearned(
+  state: NotePairMemoryState,
+  pairName: string
+): boolean {
+  const sameOctaveCards = state.cards.filter(
+    (c) => c.pair === pairName && c.sameOctave
+  );
+
+  // All same-octave cards must be introduced and have high retrievability
+  for (const card of sameOctaveCards) {
+    if (!card.card || !card.lastReviewedAt) return false;
+    if (getRetrievability(card) < 0.8) return false;
+  }
+
+  return sameOctaveCards.length > 0;
+}
+
+/**
+ * Get different-octave cards that are ready to be introduced.
+ * A pair's different-octave cards are ready when its same-octave cards are well-learned.
+ */
+export function getReadyDifferentOctaveCards(
+  state: NotePairMemoryState
+): NotePairCard[] {
+  const introducedPairs = getIntroducedPairs(state);
+  const readyCards: NotePairCard[] = [];
+
+  for (const pairName of introducedPairs) {
+    if (areSameOctaveCardsWellLearned(state, pairName)) {
+      // Find unintroduced different-octave cards for this pair
+      const diffOctaveCards = state.cards.filter(
+        (c) => c.pair === pairName && !c.sameOctave && c.card === null
+      );
+      readyCards.push(...diffOctaveCards);
+    }
+  }
+
+  return readyCards;
+}
+
+/**
  * Get cards that are due for review (introduced, sorted by urgency).
  */
 export function getDueCards(state: NotePairMemoryState): NotePairCard[] {
@@ -533,28 +600,43 @@ export function selectSessionCards(state: NotePairMemoryState): SessionCards {
   const isFirstSession = introducedCards.length === 0;
 
   const newCards: NotePairCard[] = [];
-  let newCardsAdded = 0;
 
-  // For first session, introduce first 2 pairs
+  // For first session, introduce same-octave cards for first 2 pairs
   if (isFirstSession) {
     for (let i = 0; i < 2 && i < INITIAL_PAIRS.length; i++) {
       const [familyA, familyB] = INITIAL_PAIRS[i];
-      const pairCards = state.cards.filter(
-        (c) => c.pair === getPairName(`${familyA}4`, `${familyB}4`)
+      const pairName = getPairName(`${familyA}4`, `${familyB}4`);
+      // Only same-octave cards for first session
+      const sameOctaveCards = state.cards.filter(
+        (c) => c.pair === pairName && c.sameOctave
       );
-      newCards.push(...pairCards);
-      newCardsAdded += pairCards.length;
+      newCards.push(...sameOctaveCards);
     }
   } else if (needsNewCards(state)) {
-    // Introduce one new pair at a time
-    const nextPair = selectNextPairToIntroduce(state);
-    if (nextPair && newCardsAdded < MAX_NEW_CARDS_PER_SESSION) {
-      const [familyA, familyB] = nextPair;
-      const pairName = getPairName(`${familyA}4`, `${familyB}4`);
-      const pairCards = state.cards.filter(
-        (c) => c.pair === pairName && c.card === null
-      );
-      newCards.push(...pairCards);
+    // First: try to introduce different-octave cards for well-learned pairs
+    const readyDiffOctave = getReadyDifferentOctaveCards(state);
+    if (
+      readyDiffOctave.length > 0 &&
+      newCards.length < MAX_NEW_CARDS_PER_SESSION
+    ) {
+      // Introduce different-octave cards for one pair at a time
+      const firstPair = readyDiffOctave[0].pair;
+      const pairDiffCards = readyDiffOctave.filter((c) => c.pair === firstPair);
+      newCards.push(...pairDiffCards.slice(0, MAX_NEW_CARDS_PER_SESSION));
+    }
+
+    // Second: if still need cards, introduce same-octave cards for a new pair
+    if (newCards.length < MAX_NEW_CARDS_PER_SESSION) {
+      const nextPair = selectNextPairToIntroduce(state);
+      if (nextPair) {
+        const [familyA, familyB] = nextPair;
+        const pairName = getPairName(`${familyA}4`, `${familyB}4`);
+        // Only same-octave cards for new pairs
+        const sameOctaveCards = state.cards.filter(
+          (c) => c.pair === pairName && c.sameOctave && c.card === null
+        );
+        newCards.push(...sameOctaveCards);
+      }
     }
   }
 
