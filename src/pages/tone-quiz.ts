@@ -36,13 +36,31 @@ let persistentState: ToneQuizState;
 let question: QuestionState;
 let keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
 
+/** Get allowed octaves for a note family to prevent edge identification */
+function getAllowedOctaves(family: FullTone): number[] {
+  // A and B can be in octave 3 or 4
+  // C and D can be in octave 4 or 5
+  // Others are just octave 4
+  if (family === "A" || family === "B") {
+    return [3, 4];
+  } else if (family === "C" || family === "D") {
+    return [4, 5];
+  }
+  return [4];
+}
+
+function pickOctave(family: FullTone): number {
+  const octaves = getAllowedOctaves(family);
+  return octaves[Math.floor(Math.random() * octaves.length)];
+}
+
 function initQuestion(): void {
   const [familyA, familyB] = pickRandomPair();
   const targetNote = pickTargetNote(familyA, familyB);
 
-  // All notes in octave 4
-  const noteAWithOctave = `${familyA}4`;
-  const noteBWithOctave = `${familyB}4`;
+  // Pick octaves - edge notes can vary to prevent identification by pitch height
+  const noteAWithOctave = `${familyA}${pickOctave(familyA)}`;
+  const noteBWithOctave = `${familyB}${pickOctave(familyB)}`;
 
   // Randomize which plays first
   const [first, second] = randomizeOrder(
