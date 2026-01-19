@@ -163,6 +163,15 @@ export function renderIndex(): void {
           </div>
         </a>
       </li>
+      <li>
+        <a href="#/exercises/note-pair-quiz">
+          <div class="title">Note Pair Ordering</div>
+          <div class="description">
+            Two notes play in sequence - identify which note played first.
+            Progressive introduction of note pairs with spaced repetition.
+          </div>
+        </a>
+      </li>
     </ul>
   `;
 }
