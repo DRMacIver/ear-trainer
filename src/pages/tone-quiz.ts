@@ -2,7 +2,7 @@
  * Tone Quiz Exercise
  *
  * Two tones play. User identifies which one was a particular note.
- * Continuous play - tracks history in localStorage.
+ * Features adaptive learning with stickiness and progressive difficulty.
  */
 
 import { playNote } from "../audio.js";
@@ -10,12 +10,13 @@ import {
   loadState,
   saveState,
   clearState,
-  pickRandomPair,
-  pickTargetNote,
   randomizeOrder,
   recordQuestion,
+  selectTargetNote,
+  selectOtherNote,
   ToneQuizState,
   FullTone,
+  STREAK_LENGTH,
 } from "../lib/tone-quiz-state.js";
 
 const NOTE_DURATION = 0.6;
@@ -27,8 +28,10 @@ interface QuestionState {
   familyA: FullTone; // Note family of first note
   familyB: FullTone; // Note family of second note
   targetNote: FullTone; // Which note family we're asking about
+  otherNote: FullTone; // The other note family
   hasAnswered: boolean;
   wasCorrect: boolean | null;
+  isFirstInStreak: boolean;
   startTime: number;
 }
 
@@ -54,18 +57,25 @@ function pickOctave(family: FullTone): number {
   return octaves[Math.floor(Math.random() * octaves.length)];
 }
 
-function initQuestion(): void {
-  const [familyA, familyB] = pickRandomPair();
-  const targetNote = pickTargetNote(familyA, familyB);
+function initQuestion(): boolean {
+  // Select target note (with stickiness)
+  const [targetNote, targetOctave, isNewTarget, updatedState] = selectTargetNote(
+    persistentState,
+    pickOctave
+  );
+  persistentState = updatedState;
 
-  // Pick octaves - edge notes can vary to prevent identification by pitch height
-  const noteAWithOctave = `${familyA}${pickOctave(familyA)}`;
-  const noteBWithOctave = `${familyB}${pickOctave(familyB)}`;
+  // Select other note based on current learning progress
+  const otherNote = selectOtherNote(persistentState, targetNote);
+  const otherOctave = pickOctave(otherNote);
+
+  const targetWithOctave = `${targetNote}${targetOctave}`;
+  const otherWithOctave = `${otherNote}${otherOctave}`;
 
   // Randomize which plays first
   const [first, second] = randomizeOrder(
-    { note: noteAWithOctave, family: familyA },
-    { note: noteBWithOctave, family: familyB }
+    { note: targetWithOctave, family: targetNote },
+    { note: otherWithOctave, family: otherNote }
   );
 
   question = {
@@ -74,10 +84,14 @@ function initQuestion(): void {
     familyA: first.family,
     familyB: second.family,
     targetNote,
+    otherNote,
     hasAnswered: false,
     wasCorrect: null,
+    isFirstInStreak: persistentState.streakCount === 1,
     startTime: Date.now(),
   };
+
+  return isNewTarget;
 }
 
 async function playBothNotes(): Promise<void> {
@@ -86,17 +100,28 @@ async function playBothNotes(): Promise<void> {
   await playNote(question.noteB, { duration: NOTE_DURATION });
 }
 
+function flashScreen(): void {
+  const app = document.getElementById("app")!;
+  app.classList.add("flash");
+  setTimeout(() => app.classList.remove("flash"), 300);
+}
+
 function render(): void {
   const app = document.getElementById("app")!;
 
   const recentHistory = persistentState.history.slice(-20);
   const recentCorrect = recentHistory.filter((r) => r.correct).length;
   const totalPlayed = persistentState.history.length;
+  const vocabDisplay = persistentState.learningVocabulary.join(", ");
+  const streakInfo =
+    persistentState.streakCount > 0
+      ? `(${persistentState.streakCount}/${STREAK_LENGTH})`
+      : "";
 
   app.innerHTML = `
     <a href="#/" class="back-link">&larr; Back to exercises</a>
     <h1>Tone Quiz</h1>
-    <p>Two notes play. Which one was the <strong>${question.targetNote}</strong>?</p>
+    <p>Two notes play. Which one was the <strong>${question.targetNote}</strong>? ${streakInfo}</p>
     <p class="keyboard-hints"><strong>Keys:</strong> <kbd>1</kbd>/<kbd>←</kbd> First, <kbd>2</kbd>/<kbd>→</kbd> Second, <kbd>R</kbd> Replay, <kbd>Space</kbd> Continue</p>
 
     <div class="exercise-container">
@@ -116,6 +141,11 @@ function render(): void {
         <span id="score">${recentCorrect} / ${recentHistory.length}</span>
         <span class="stats-label" style="margin-left: 1rem;">Total:</span>
         <span>${totalPlayed}</span>
+      </div>
+
+      <div class="learning-info">
+        <span class="stats-label">Learning:</span>
+        <span>${vocabDisplay}</span>
       </div>
 
       <div class="danger-zone">
@@ -163,6 +193,7 @@ function handleClearHistory(): void {
   if (confirm("Clear all history? This cannot be undone.")) {
     clearState();
     persistentState = loadState();
+    initQuestion();
     render();
     playBothNotes();
   }
@@ -229,7 +260,9 @@ function handleChoice(chosenIndex: number): void {
     noteA: question.noteA,
     noteB: question.noteB,
     targetNote: question.targetNote,
+    otherNote: question.otherNote,
     correct: isCorrect,
+    wasFirstInStreak: question.isFirstInStreak,
     timeMs: Date.now() - question.startTime,
   });
   saveState(persistentState);
@@ -271,8 +304,11 @@ function updateStats(): void {
 }
 
 function nextQuestion(): void {
-  initQuestion();
+  const isNewTarget = initQuestion();
   render();
+  if (isNewTarget) {
+    flashScreen();
+  }
   playBothNotes();
 }
 
