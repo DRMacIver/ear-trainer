@@ -18,6 +18,7 @@ import { renderMatchTheFrequency } from "./pages/match-the-frequency.js";
 import { renderRelativeFrequency } from "./pages/relative-frequency.js";
 import { renderFreqMemorize } from "./pages/freq-memorize.js";
 import { renderNoteFreqQuiz } from "./pages/note-freq-quiz.js";
+import { renderNoteIdQuiz } from "./pages/note-id-quiz.js";
 
 type Route = () => void | Promise<void>;
 
@@ -39,6 +40,7 @@ const routes: Record<string, Route> = {
   "#/exercises/relative-frequency": renderRelativeFrequency,
   "#/exercises/freq-memorize": renderFreqMemorize,
   "#/exercises/note-freq-quiz": renderNoteFreqQuiz,
+  "#/exercises/note-id-quiz": renderNoteIdQuiz,
 };
 
 function router(): void {

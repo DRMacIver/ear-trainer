@@ -154,6 +154,15 @@ export function renderIndex(): void {
           </div>
         </a>
       </li>
+      <li>
+        <a href="#/exercises/note-id-quiz">
+          <div class="title">Progressive Note ID</div>
+          <div class="description">
+            Learn to identify notes through progressive training: first octaves,
+            then note families (via sequences), finally full notes. Cards retire as you master them.
+          </div>
+        </a>
+      </li>
     </ul>
   `;
 }
