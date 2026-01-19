@@ -211,15 +211,6 @@ function render(): void {
   const stats = getStats(state.memoryState);
   const choices = state.currentChoices;
 
-  // Count completed cards (those with enough correct answers)
-  const completedCount = state.allFrequencies.filter(
-    (f) => (state.correctCounts.get(f) ?? 0) >= REQUIRED_CORRECT
-  ).length;
-  const totalCards = state.allFrequencies.length;
-
-  const progress = `${completedCount}/${totalCards} complete`;
-  const cardType = state.isNewCard ? "NEW" : "Review";
-
   const choiceButtons = choices
     .map((freq) => {
       let className = "choice-btn freq-choice";
@@ -244,7 +235,7 @@ function render(): void {
   app.innerHTML = `
     <a href="#/" class="back-link">&larr; Back to exercises</a>
     <h1>Frequency Memorization</h1>
-    <p>Listen and identify the frequency. ${progress} (${cardType})</p>
+    <p>Listen and identify the frequency.</p>
     <p>Use <strong>number keys 1-4</strong> to select, <strong>R</strong> to replay.</p>
 
     <div class="exercise-container">
