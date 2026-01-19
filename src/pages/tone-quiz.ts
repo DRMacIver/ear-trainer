@@ -39,6 +39,9 @@ interface QuestionState {
 let persistentState: ToneQuizState;
 let question: QuestionState;
 let keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
+let autoAdvanceTimeout: ReturnType<typeof setTimeout> | null = null;
+
+const AUTO_ADVANCE_DELAY = 2000; // ms
 
 /** Get allowed octaves for a note family to prevent edge identification */
 function getAllowedOctaves(family: FullTone): number[] {
@@ -233,6 +236,7 @@ function setupEventListeners(): void {
       document.removeEventListener("keydown", keyboardHandler);
       keyboardHandler = null;
     }
+    clearAutoAdvance();
     window.removeEventListener("hashchange", cleanupOnNavigate);
   };
   window.addEventListener("hashchange", cleanupOnNavigate);
@@ -275,6 +279,8 @@ function renderFeedback(): void {
   if (question.wasCorrect) {
     feedback.className = "feedback success";
     feedback.textContent = "Correct! Press Space to continue.";
+    // Auto-advance after delay
+    autoAdvanceTimeout = setTimeout(nextQuestion, AUTO_ADVANCE_DELAY);
   } else {
     feedback.className = "feedback error";
     const targetPosition = question.familyA === question.targetNote ? "first" : "second";
@@ -301,7 +307,15 @@ function updateStats(): void {
   }
 }
 
+function clearAutoAdvance(): void {
+  if (autoAdvanceTimeout) {
+    clearTimeout(autoAdvanceTimeout);
+    autoAdvanceTimeout = null;
+  }
+}
+
 function nextQuestion(): void {
+  clearAutoAdvance();
   const isNewTarget = initQuestion();
   render();
   if (isNewTarget) {
