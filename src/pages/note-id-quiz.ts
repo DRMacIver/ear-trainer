@@ -265,8 +265,17 @@ function handleAnswer(answer: string | number): void {
 
     const questionType = state.currentQuestion.card.questionType;
 
-    if (questionType === "noteSequence") {
-      // For noteSequence, just mark as incorrect and eliminate the wrong choice
+    if (questionType === "octaveId") {
+      // For octaveId, eliminate wrong choice and play teaching sequence
+      state.lastFeedback = null; // No text feedback, just listen
+      state.eliminatedChoices.add(answer);
+
+      render();
+
+      // Play teaching sequence: wrong octave then correct octave
+      playOctaveTeachingSequence(answer as number, correctAnswer as number);
+    } else if (questionType === "noteSequence") {
+      // For noteSequence, eliminate wrong choice and play teaching sequence
       state.lastFeedback = "incorrect";
       state.eliminatedChoices.add(answer);
 
@@ -278,74 +287,38 @@ function handleAnswer(answer: string | number): void {
         correctAnswer as string
       );
     } else {
-      // For octaveId and fullNote, use directional feedback
-      let isTooHigh: boolean;
-      if (questionType === "octaveId") {
-        isTooHigh = (answer as number) > (correctAnswer as number);
-      } else {
-        // fullNote
-        const noteOrder = [
-          "C",
-          "C#",
-          "D",
-          "D#",
-          "E",
-          "F",
-          "F#",
-          "G",
-          "G#",
-          "A",
-          "A#",
-          "B",
-        ];
-        const getIndex = (n: string) => noteOrder.indexOf(n.replace(/\d+$/, ""));
-        isTooHigh =
-          getIndex(answer as string) > getIndex(correctAnswer as string);
-      }
+      // For fullNote, use directional feedback
+      const noteOrder = [
+        "C",
+        "C#",
+        "D",
+        "D#",
+        "E",
+        "F",
+        "F#",
+        "G",
+        "G#",
+        "A",
+        "A#",
+        "B",
+      ];
+      const getIndex = (n: string) => noteOrder.indexOf(n.replace(/\d+$/, ""));
+      const isTooHigh =
+        getIndex(answer as string) > getIndex(correctAnswer as string);
       state.lastFeedback = isTooHigh ? "too-high" : "too-low";
 
       // Eliminate choices directionally
       for (const choice of state.currentChoices) {
-        if (questionType === "octaveId") {
-          if (isTooHigh && (choice as number) >= (answer as number)) {
-            state.eliminatedChoices.add(choice);
-          } else if (!isTooHigh && (choice as number) <= (answer as number)) {
-            state.eliminatedChoices.add(choice);
-          }
-        } else {
-          // fullNote
-          const noteOrder = [
-            "C",
-            "C#",
-            "D",
-            "D#",
-            "E",
-            "F",
-            "F#",
-            "G",
-            "G#",
-            "A",
-            "A#",
-            "B",
-          ];
-          const getIndex = (n: string) =>
-            noteOrder.indexOf(n.replace(/\d+$/, ""));
-          const choiceIdx = getIndex(choice as string);
-          const answerIdx = getIndex(answer as string);
-          if (isTooHigh && choiceIdx >= answerIdx) {
-            state.eliminatedChoices.add(choice);
-          } else if (!isTooHigh && choiceIdx <= answerIdx) {
-            state.eliminatedChoices.add(choice);
-          }
+        const choiceIdx = getIndex(choice as string);
+        const answerIdx = getIndex(answer as string);
+        if (isTooHigh && choiceIdx >= answerIdx) {
+          state.eliminatedChoices.add(choice);
+        } else if (!isTooHigh && choiceIdx <= answerIdx) {
+          state.eliminatedChoices.add(choice);
         }
       }
 
       render();
-
-      // For octaveId, play teaching sequence: wrong octave then correct octave
-      if (questionType === "octaveId") {
-        playOctaveTeachingSequence(answer as number, correctAnswer as number);
-      }
     }
   }
 }
@@ -471,14 +444,13 @@ async function playOctaveTeachingSequence(
   await playFrequency(wrongFreq, { duration: NOTE_DURATION });
   await new Promise((r) => setTimeout(r, SEQUENCE_GAP_MS));
 
-  // Play the correct octave
-  state.highlightedChoice = correctOctave;
+  // Play the correct octave (without highlighting - don't reveal the answer)
+  state.highlightedChoice = null;
   render();
   const correctNote = `${family}${correctOctave}`;
   const correctFreq = getFrequencyForNote(correctNote);
   await playFrequency(correctFreq, { duration: NOTE_DURATION });
 
-  state.highlightedChoice = null;
   state.playingOctaveTeaching = false;
   state.inputEnabled = true;
   render();
