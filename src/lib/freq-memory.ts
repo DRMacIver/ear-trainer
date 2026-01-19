@@ -125,6 +125,130 @@ export function getDueCards(state: FreqMemoryState): FrequencyCard[] {
 }
 
 /**
+ * Select 3 well-separated cards most in need of review.
+ * "Well separated" means we try to spread them across the frequency range.
+ */
+function selectWellSeparatedUrgentCards(
+  state: FreqMemoryState
+): FrequencyCard[] {
+  const dueCards = getDueCards(state);
+  if (dueCards.length < 3) return dueCards;
+
+  // Divide the frequency range into 3 regions
+  const minFreq = ALL_FREQUENCIES[0];
+  const maxFreq = ALL_FREQUENCIES[ALL_FREQUENCIES.length - 1];
+  const range = maxFreq - minFreq;
+  const regionSize = range / 3;
+
+  const regions = [
+    { min: minFreq, max: minFreq + regionSize },
+    { min: minFreq + regionSize, max: minFreq + 2 * regionSize },
+    { min: minFreq + 2 * regionSize, max: maxFreq + 1 },
+  ];
+
+  // Pick the most urgent card from each region
+  const selected: FrequencyCard[] = [];
+  for (const region of regions) {
+    const inRegion = dueCards.filter(
+      (c) => c.frequency >= region.min && c.frequency < region.max
+    );
+    // Find most urgent in this region that isn't already selected
+    const candidate = inRegion.find(
+      (c) => !selected.some((s) => s.frequency === c.frequency)
+    );
+    if (candidate) {
+      selected.push(candidate);
+    }
+  }
+
+  // If we don't have 3, fill from most urgent overall
+  for (const card of dueCards) {
+    if (selected.length >= 3) break;
+    if (!selected.some((s) => s.frequency === card.frequency)) {
+      selected.push(card);
+    }
+  }
+
+  return selected;
+}
+
+/**
+ * Find familiar cards in a gap between two frequencies.
+ * Returns cards sorted by familiarity (most familiar first).
+ */
+function getFamiliarCardsInGap(
+  state: FreqMemoryState,
+  lowFreq: number,
+  highFreq: number,
+  exclude: number[]
+): FrequencyCard[] {
+  return state.cards
+    .filter(
+      (c) =>
+        c.card !== null &&
+        c.frequency > lowFreq &&
+        c.frequency < highFreq &&
+        !exclude.includes(c.frequency)
+    )
+    .sort((a, b) => b.reviewCount - a.reviewCount); // Most familiar first
+}
+
+/**
+ * Select session cards for review-only mode (all or nearly all introduced).
+ * Picks 3 well-separated urgent cards, then fills gaps with familiar pairs.
+ */
+function selectReviewSessionCards(state: FreqMemoryState): number[] {
+  const anchors = selectWellSeparatedUrgentCards(state);
+  const anchorFreqs = anchors.map((c) => c.frequency).sort((a, b) => a - b);
+
+  if (anchorFreqs.length < 3) {
+    // Not enough cards, just return what we have
+    return anchorFreqs;
+  }
+
+  const result: number[] = [];
+  const used = new Set(anchorFreqs);
+
+  // For each gap between anchors, pick a familiar pair
+  const gaps = [
+    { low: ALL_FREQUENCIES[0] - 1, high: anchorFreqs[0] },
+    { low: anchorFreqs[0], high: anchorFreqs[1] },
+    { low: anchorFreqs[1], high: anchorFreqs[2] },
+    { low: anchorFreqs[2], high: ALL_FREQUENCIES[ALL_FREQUENCIES.length - 1] + 1 },
+  ];
+
+  // Interleave: anchor, filler, anchor, filler, anchor, fillers
+  // But we want: pick pairs in gaps between the 3 anchors
+  // Let's pick 1 from each of the 2 middle gaps (between anchor pairs)
+
+  for (let i = 1; i <= 2; i++) {
+    const gap = gaps[i];
+    const familiar = getFamiliarCardsInGap(
+      state,
+      gap.low,
+      gap.high,
+      Array.from(used)
+    );
+    // Pick up to 1 from this gap
+    if (familiar.length > 0) {
+      result.push(familiar[0].frequency);
+      used.add(familiar[0].frequency);
+    }
+  }
+
+  // Build final order: interleave anchors and fillers
+  // anchor[0], filler[0], anchor[1], filler[1], anchor[2]
+  const finalOrder: number[] = [];
+  finalOrder.push(anchorFreqs[0]);
+  if (result[0]) finalOrder.push(result[0]);
+  finalOrder.push(anchorFreqs[1]);
+  if (result[1]) finalOrder.push(result[1]);
+  finalOrder.push(anchorFreqs[2]);
+
+  return finalOrder;
+}
+
+/**
  * Find the best "splitting" frequency for introducing new cards.
  * Returns the most familiar introduced frequency that has uninstructed
  * frequencies on both sides.
@@ -255,17 +379,20 @@ export function selectSessionCards(state: FreqMemoryState): SessionCards {
   const introduced = getIntroducedFrequencies(state);
   const newFreqs = getNewFrequencies(state);
 
-  // Check if complete
-  if (newFreqs.length === 0) {
-    // All cards introduced, just do reviews
-    const dueCards = getDueCards(state);
-    const reviewFreqs = dueCards.slice(0, 5).map((c) => c.frequency);
+  // Check if complete or nearly complete (0 or 1 new cards left)
+  if (newFreqs.length <= 1) {
+    // Use well-separated anchors + familiar fillers strategy
+    const reviewFreqs = selectReviewSessionCards(state);
+
+    // If there's one new card left, add it to the session
+    const newCards = newFreqs.length === 1 ? [newFreqs[0]] : [];
+
     return {
-      newCards: [],
+      newCards,
       reviewCards: reviewFreqs,
       splittingCard: null,
       isFirstSession: false,
-      isComplete: true,
+      isComplete: newFreqs.length === 0,
     };
   }
 
