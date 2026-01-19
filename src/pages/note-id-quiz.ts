@@ -473,6 +473,26 @@ async function playOctaveNote(octave: number): Promise<void> {
 }
 
 /**
+ * Play a note family's sequence (for clicking note buttons after answering).
+ */
+async function playNoteFamilySequence(family: string): Promise<void> {
+  state.highlightedChoice = family;
+  render();
+
+  for (const octave of OCTAVES) {
+    const note = `${family}${octave}`;
+    const freq = getFrequencyForNote(note);
+    await playFrequency(freq, { duration: NOTE_DURATION });
+    if (octave < 5) {
+      await new Promise((r) => setTimeout(r, SEQUENCE_GAP_MS));
+    }
+  }
+
+  state.highlightedChoice = null;
+  render();
+}
+
+/**
  * Play teaching sequence for wrong noteSequence answer:
  * 1. Play the wrong family in 3→4→5
  * 2. Then play the correct family in 3→4→5
@@ -632,17 +652,20 @@ function render(): void {
   const typeLabel = getQuestionTypeLabel(card);
 
   const isOctaveId = card.questionType === "octaveId";
+  const isNoteSequence = card.questionType === "noteSequence";
+  const allowsExploration = isOctaveId || isNoteSequence;
+
   const choiceButtons = choices
     .map((choice, idx) => {
       let className = "choice-btn nf-choice";
       const isEliminated = state.eliminatedChoices.has(choice);
       const isCorrect = state.hasAnswered && choice === correctAnswer;
 
-      // For octaveId, keep buttons clickable after answering (to allow exploration)
+      // For octaveId and noteSequence, keep buttons clickable after answering (to allow exploration)
       // But disable during sequence playback or teaching playback
       let isDisabled: boolean;
-      if (isOctaveId && state.hasAnswered) {
-        // After answering octaveId, only disable during playback
+      if (allowsExploration && state.hasAnswered) {
+        // After answering, only disable during playback
         isDisabled =
           state.playingSequence ||
           state.playingOctaveTeaching ||
@@ -665,8 +688,8 @@ function render(): void {
         className += " eliminated";
       }
 
-      // Add data attribute to indicate if this is for exploration (post-answer octaveId)
-      const isExploration = isOctaveId && state.hasAnswered;
+      // Add data attribute to indicate if this is for exploration (post-answer)
+      const isExploration = allowsExploration && state.hasAnswered;
       return `<button class="${className}" data-choice="${choice}" data-idx="${idx}" data-exploration="${isExploration}" ${isDisabled ? "disabled" : ""}>${formatChoice(choice, card.questionType)}</button>`;
     })
     .join("");
@@ -684,6 +707,8 @@ function render(): void {
   } else if (state.hasAnswered) {
     if (isOctaveId) {
       feedbackHtml = `<div class="feedback success">Correct! Click octaves to compare.</div>`;
+    } else if (isNoteSequence) {
+      feedbackHtml = `<div class="feedback success">Correct! Click notes to compare.</div>`;
     } else {
       feedbackHtml = `<div class="feedback success">Correct!</div>`;
     }
@@ -841,14 +866,22 @@ function setupEventListeners(): void {
       const choiceStr = (btn as HTMLElement).dataset.choice || "";
       const isExploration =
         (btn as HTMLElement).dataset.exploration === "true";
+      const questionType = state.currentQuestion.card.questionType;
 
-      if (state.currentQuestion.card.questionType === "octaveId") {
+      if (questionType === "octaveId") {
         const octave = parseInt(choiceStr, 10);
         if (!state.hasAnswered) {
           handleAnswer(octave);
         } else if (isExploration && !state.playingOctaveTeaching) {
           // After answering, clicking plays that octave's note
           playOctaveNote(octave);
+        }
+      } else if (questionType === "noteSequence") {
+        if (!state.hasAnswered) {
+          handleAnswer(choiceStr);
+        } else if (isExploration && !state.playingNoteTeaching) {
+          // After answering, clicking plays that note family's sequence
+          playNoteFamilySequence(choiceStr);
         }
       } else if (!state.hasAnswered) {
         handleAnswer(choiceStr);
