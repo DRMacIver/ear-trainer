@@ -42,7 +42,6 @@ interface QuestionState {
 // Introduction mode state
 interface IntroductionState {
   introducedNote: FullTone;
-  phase: "title" | "explore";
   vocabNotes: FullTone[]; // All vocab notes in chromatic order
 }
 
@@ -138,7 +137,6 @@ function getVocabInChromaticOrder(): FullTone[] {
 function startIntroduction(note: FullTone): void {
   introState = {
     introducedNote: note,
-    phase: "title",
     vocabNotes: getVocabInChromaticOrder(),
   };
   renderIntroduction();
@@ -169,10 +167,6 @@ async function playIntroductionSequence(): Promise<void> {
   }
 
   isPlaying = false;
-
-  // Transition to explore phase
-  introState.phase = "explore";
-  renderIntroduction();
 }
 
 /** Render the introduction UI */
@@ -180,23 +174,6 @@ function renderIntroduction(): void {
   if (!introState) return;
 
   const app = document.getElementById("app")!;
-
-  if (introState.phase === "title") {
-    app.innerHTML = `
-      <a href="#/" class="back-link">&larr; Back to exercises</a>
-      <h1>Tone Quiz</h1>
-
-      <div class="exercise-container">
-        <div class="introduction-title">
-          <h2>Introducing ${introState.introducedNote}</h2>
-          <p>Listen to the note in three octaves, then all your notes in order...</p>
-        </div>
-      </div>
-    `;
-    return;
-  }
-
-  // Explore phase - show clickable buttons
   const note = introState.introducedNote;
 
   app.innerHTML = `
@@ -206,7 +183,7 @@ function renderIntroduction(): void {
     <div class="exercise-container">
       <div class="introduction-title">
         <h2>Introducing ${note}</h2>
-        <p>Click any button to hear that note again.</p>
+        <p>Click any button to hear that note.</p>
       </div>
 
       <div class="intro-section">
@@ -215,7 +192,7 @@ function renderIntroduction(): void {
       </div>
 
       <div class="intro-section">
-        <h3>All notes you're learning</h3>
+        <h3>All notes you're currently learning (Octave 4)</h3>
         <div class="intro-buttons" id="vocab-buttons"></div>
       </div>
 
