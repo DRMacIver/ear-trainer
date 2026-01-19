@@ -572,6 +572,7 @@ function render(): void {
       <div class="learning-info">
         <span class="stats-label">Learning:</span>
         <span>${vocabDisplay}</span>
+        <a href="#/exercises/tone-quiz/stats" class="stats-link">View Stats</a>
       </div>
 
       <div class="danger-zone">

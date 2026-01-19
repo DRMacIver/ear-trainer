@@ -1203,3 +1203,108 @@ kbd {
     background-color: transparent;
   }
 }
+
+/* Performance Matrix Styles */
+.performance-matrix {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  font-size: 0.85rem;
+}
+
+.performance-matrix th,
+.performance-matrix td {
+  padding: 0.5rem;
+  text-align: center;
+  border: 1px solid #333;
+}
+
+.performance-matrix th {
+  background: #16213e;
+  font-weight: 600;
+}
+
+.performance-matrix tbody th {
+  text-align: left;
+  padding-left: 0.75rem;
+}
+
+.performance-matrix td {
+  min-width: 3rem;
+}
+
+.perf-green {
+  background: #2e7d32;
+  color: white;
+}
+
+.perf-amber {
+  background: #f57c00;
+  color: white;
+}
+
+.perf-red {
+  background: #c62828;
+  color: white;
+}
+
+.perf-na {
+  background: #333;
+  color: #666;
+}
+
+.perf-empty {
+  background: #1a1a2e;
+}
+
+.stats-legend {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  margin: 1rem 0;
+}
+
+.stats-legend span {
+  padding: 0.25rem 0.75rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+}
+
+.stats-note {
+  color: #888;
+  font-size: 0.8rem;
+  text-align: center;
+  margin-top: 1rem;
+}
+
+.stats-link {
+  display: inline-block;
+  margin-top: 0.5rem;
+  color: #64b5f6;
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.stats-link:hover {
+  text-decoration: underline;
+}
+
+.perf-clickable {
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.perf-clickable:hover {
+  opacity: 0.8;
+}
+
+.learning-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.learning-info .stats-link {
+  margin-left: auto;
+}

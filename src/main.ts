@@ -22,6 +22,7 @@ import { renderNoteFreqQuiz } from "./pages/note-freq-quiz.js";
 import { renderNoteIdQuiz } from "./pages/note-id-quiz.js";
 import { renderNotePairQuiz } from "./pages/note-pair-quiz.js";
 import { renderToneQuiz } from "./pages/tone-quiz.js";
+import { renderToneQuizStats } from "./pages/tone-quiz-stats.js";
 
 type Route = () => void | Promise<void>;
 
@@ -47,6 +48,7 @@ const routes: Record<string, Route> = {
   "#/exercises/note-id-quiz": renderNoteIdQuiz,
   "#/exercises/note-pair-quiz": renderNotePairQuiz,
   "#/exercises/tone-quiz": renderToneQuiz,
+  "#/exercises/tone-quiz/stats": renderToneQuizStats,
 };
 
 function router(): void {
