@@ -1022,6 +1022,17 @@ a:hover {
   text-align: center;
 }
 
+.freq-choice.eliminated {
+  opacity: 0.4;
+  cursor: not-allowed;
+  text-decoration: line-through;
+}
+
+.freq-choice.eliminated:hover {
+  background: #0f3460;
+  transform: none;
+}
+
 /* Danger Zone */
 .danger-zone {
   margin-top: 3rem;

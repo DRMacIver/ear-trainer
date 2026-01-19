@@ -32,10 +32,12 @@ interface ExerciseState {
   allFrequencies: number[]; // All frequencies in this session
   correctCounts: Map<number, number>; // Correct answers per frequency this session
   currentFrequency: number;
-  currentChoices: number[]; // Fixed choices for current question
-  hasAnswered: boolean;
+  currentChoices: number[]; // Fixed choices for current question (sorted low to high)
+  eliminatedChoices: Set<number>; // Choices that have been greyed out
+  hasAnswered: boolean; // True only when answered correctly
   wasCorrect: boolean | null;
   userAnswer: number | null;
+  lastFeedback: "too-high" | "too-low" | null; // Feedback for wrong answers
   sessionCorrect: number;
   sessionTotal: number;
   inputEnabled: boolean;
@@ -71,9 +73,11 @@ function initExercise(): void {
     correctCounts,
     currentFrequency: firstFreq,
     currentChoices: getChoices(firstFreq),
+    eliminatedChoices: new Set(),
     hasAnswered: false,
     wasCorrect: null,
     userAnswer: null,
+    lastFeedback: null,
     sessionCorrect: 0,
     sessionTotal: 0,
     inputEnabled: false,
@@ -129,20 +133,37 @@ function getChoices(correctFreq: number): number[] {
     if (!choices.includes(random)) choices.push(random);
   }
 
-  // Shuffle final choices
-  return choices.sort(() => Math.random() - 0.5);
+  // Sort from low to high
+  return choices.sort((a, b) => a - b);
 }
 
 function handleAnswer(answer: number): void {
   if (state.hasAnswered || !state.inputEnabled) return;
+  if (state.eliminatedChoices.has(answer)) return; // Can't click eliminated choices
 
-  state.hasAnswered = true;
   state.userAnswer = answer;
-  state.wasCorrect = answer === state.currentFrequency;
-  state.sessionTotal++;
 
-  if (state.wasCorrect) {
+  if (answer === state.currentFrequency) {
+    // Correct!
+    state.hasAnswered = true;
+    state.wasCorrect = true;
+    state.lastFeedback = null;
+    state.sessionTotal++;
     state.sessionCorrect++;
+  } else {
+    // Wrong - give feedback and eliminate choices
+    state.wasCorrect = false;
+    const isToohigh = answer > state.currentFrequency;
+    state.lastFeedback = isToohigh ? "too-high" : "too-low";
+
+    // Eliminate this choice and all choices in the wrong direction
+    for (const choice of state.currentChoices) {
+      if (isToohigh && choice >= answer) {
+        state.eliminatedChoices.add(choice);
+      } else if (!isToohigh && choice <= answer) {
+        state.eliminatedChoices.add(choice);
+      }
+    }
   }
 
   render();
@@ -187,9 +208,11 @@ function advanceToNext(): void {
   );
   state.currentFrequency = nextFreq;
   state.currentChoices = getChoices(nextFreq);
+  state.eliminatedChoices = new Set();
   state.hasAnswered = false;
   state.wasCorrect = null;
   state.userAnswer = null;
+  state.lastFeedback = null;
   state.isNewCard = state.sessionCards.newCards.includes(nextFreq);
   state.inputEnabled = false;
 
@@ -214,23 +237,30 @@ function render(): void {
   const choiceButtons = choices
     .map((freq) => {
       let className = "choice-btn freq-choice";
-      if (state.hasAnswered) {
-        if (freq === state.currentFrequency) {
-          className += " correct";
-        } else if (freq === state.userAnswer) {
-          className += " incorrect";
-        }
+      const isEliminated = state.eliminatedChoices.has(freq);
+
+      if (state.hasAnswered && freq === state.currentFrequency) {
+        className += " correct";
+      } else if (isEliminated) {
+        className += " eliminated";
       }
-      return `<button class="${className}" data-freq="${freq}">${formatFrequency(freq)}</button>`;
+
+      return `<button class="${className}" data-freq="${freq}" ${isEliminated ? "disabled" : ""}>${formatFrequency(freq)}</button>`;
     })
     .join("");
 
-  // Only show grade buttons if correct; wrong answers auto-grade as Again
-  const afterAnswer = state.hasAnswered
-    ? state.wasCorrect
-      ? renderGradeButtons()
-      : `<button class="choice-btn" id="next-btn">Next</button>`
-    : "";
+  // Show feedback
+  let feedbackHtml = "";
+  if (state.hasAnswered) {
+    feedbackHtml = `<div class="feedback success">Correct! ${formatFrequency(state.currentFrequency)}</div>`;
+  } else if (state.lastFeedback) {
+    const feedbackText =
+      state.lastFeedback === "too-high" ? "Too high!" : "Too low!";
+    feedbackHtml = `<div class="feedback error">${feedbackText}</div>`;
+  }
+
+  // Only show grade buttons after correct answer
+  const afterAnswer = state.hasAnswered ? renderGradeButtons() : "";
 
   app.innerHTML = `
     <a href="#/" class="back-link">&larr; Back to exercises</a>
@@ -249,7 +279,7 @@ function render(): void {
 
       ${afterAnswer}
 
-      <div id="feedback"></div>
+      ${feedbackHtml}
 
       <div class="stats-row">
         <div class="stats correct-stat">
@@ -273,7 +303,6 @@ function render(): void {
     </div>
   `;
 
-  renderFeedback();
   setupEventListeners();
 }
 
@@ -289,25 +318,6 @@ function renderGradeButtons(): string {
       </div>
     </div>
   `;
-}
-
-function renderFeedback(): void {
-  const feedback = document.getElementById("feedback");
-  if (!feedback) return;
-
-  if (!state.hasAnswered) {
-    feedback.className = "";
-    feedback.textContent = "";
-    return;
-  }
-
-  if (state.wasCorrect) {
-    feedback.className = "feedback success";
-    feedback.textContent = `Correct! The frequency was ${formatFrequency(state.currentFrequency)}.`;
-  } else {
-    feedback.className = "feedback error";
-    feedback.textContent = `Wrong! The frequency was ${formatFrequency(state.currentFrequency)}, not ${formatFrequency(state.userAnswer!)}.`;
-  }
 }
 
 function renderSessionComplete(): void {
@@ -382,12 +392,6 @@ function setupEventListeners(): void {
     });
   });
 
-  // Next button (shown when wrong - auto-grades as Again)
-  const nextBtn = document.getElementById("next-btn");
-  nextBtn?.addEventListener("click", () => {
-    handleGrade(Grade.AGAIN);
-  });
-
   if (keyboardHandler) {
     document.removeEventListener("keydown", keyboardHandler);
   }
@@ -401,25 +405,19 @@ function setupEventListeners(): void {
       return;
     }
 
+    const num = parseInt(e.key, 10);
+
     if (!state.hasAnswered) {
-      // Number keys 1-4 for choices
-      const num = parseInt(e.key, 10);
+      // Number keys 1-4 for choices (handleAnswer checks if eliminated)
       if (num >= 1 && num <= 4 && num <= choices.length) {
         e.preventDefault();
         handleAnswer(choices[num - 1]);
       }
-    } else if (state.wasCorrect) {
+    } else {
       // After correct answer, 1-4 for grades
-      const num = parseInt(e.key, 10);
       if (num >= 1 && num <= 4) {
         e.preventDefault();
         handleGrade(num as Grade);
-      }
-    } else {
-      // After wrong answer, any key moves on (auto-grade as Again)
-      if (e.key === "Enter" || e.key === " " || (e.key >= "1" && e.key <= "4")) {
-        e.preventDefault();
-        handleGrade(Grade.AGAIN);
       }
     }
   };
