@@ -203,6 +203,28 @@ function formatFrequency(freq: number): string {
     : `${Math.round(freq)}Hz`;
 }
 
+function getButtonClass(answer: "higher" | "lower" | "same"): string {
+  if (!state.hasAnswered) return "choice-btn";
+
+  const isUserAnswer = state.userAnswer === answer;
+  const isCorrectAnswer = state.correctAnswer === answer;
+
+  // If tight range and wrong, treat user's answer as correct (don't reveal actual answer)
+  if (state.wasTightRange && !state.wasCorrect) {
+    if (isUserAnswer) return "choice-btn correct";
+    return "choice-btn";
+  }
+
+  // Normal case
+  if (isUserAnswer) {
+    return state.wasCorrect ? "choice-btn correct" : "choice-btn incorrect";
+  }
+  if (isCorrectAnswer && !state.wasCorrect) {
+    return "choice-btn correct";
+  }
+  return "choice-btn";
+}
+
 function render(): void {
   const app = document.getElementById("app")!;
 
@@ -227,13 +249,13 @@ function render(): void {
       </div>
 
       <div class="choice-buttons" id="choice-buttons">
-        <button class="choice-btn${state.hasAnswered && state.userAnswer === "lower" ? (state.wasCorrect ? " correct" : " incorrect") : ""}${state.hasAnswered && state.correctAnswer === "lower" && state.userAnswer !== "lower" ? " correct" : ""}" data-answer="lower">
+        <button class="${getButtonClass("lower")}" data-answer="lower">
           Lower
         </button>
-        <button class="choice-btn${state.hasAnswered && state.userAnswer === "same" ? (state.wasCorrect ? " correct" : " incorrect") : ""}${state.hasAnswered && state.correctAnswer === "same" && state.userAnswer !== "same" ? " correct" : ""}" data-answer="same">
+        <button class="${getButtonClass("same")}" data-answer="same">
           Same
         </button>
-        <button class="choice-btn${state.hasAnswered && state.userAnswer === "higher" ? (state.wasCorrect ? " correct" : " incorrect") : ""}${state.hasAnswered && state.correctAnswer === "higher" && state.userAnswer !== "higher" ? " correct" : ""}" data-answer="higher">
+        <button class="${getButtonClass("higher")}" data-answer="higher">
           Higher
         </button>
       </div>
