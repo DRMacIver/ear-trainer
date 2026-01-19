@@ -280,8 +280,9 @@ function renderFeedback(): void {
     feedback.textContent = "Correct! Press Space to continue.";
   } else {
     feedback.className = "feedback error";
+    const targetPosition = question.familyA === question.targetNote ? "first" : "second";
     feedback.innerHTML = `
-      Incorrect. The ${question.targetNote} was ${question.familyA === question.targetNote ? "first" : "second"}.
+      Incorrect. The ${question.targetNote} was ${targetPosition} (the other note was ${question.otherNote}).
       <br><button id="replay-btn" class="play-again-btn" style="margin-top: 0.5rem;">Replay Both Notes</button>
       <br><small>Press Space to continue.</small>
     `;
