@@ -360,6 +360,23 @@ describe("getNearbyNotes", () => {
     }
   });
 
+  it("filters to allowed notes when provided", () => {
+    const allowed = ["C4", "E4", "G4", "A4"];
+    const notes = getNearbyNotes("A4", 4, allowed);
+    expect(notes.length).toBeLessThanOrEqual(4);
+    expect(notes).toContain("A4"); // Target always included
+    // All notes should be from allowed list
+    for (const note of notes) {
+      expect(allowed).toContain(note);
+    }
+  });
+
+  it("includes target even if not in allowed notes", () => {
+    const allowed = ["C4", "E4", "G4"]; // A4 not in allowed
+    const notes = getNearbyNotes("A4", 4, allowed);
+    expect(notes).toContain("A4");
+  });
+
   it("handles edge case at beginning of octave", () => {
     const notes = getNearbyNotes("C4", 4);
     expect(notes.length).toBe(4);
@@ -399,6 +416,20 @@ describe("getNearbyFrequencies", () => {
     const freqs = getNearbyFrequencies(highestFreq, 4);
     expect(freqs.length).toBe(4);
     expect(freqs).toContain(highestFreq);
+  });
+
+  it("filters to allowed notes when provided", () => {
+    const allowed = ["C4", "E4", "G4", "A4"];
+    const freqs = getNearbyFrequencies(440, 4, allowed); // 440 = A4
+    expect(freqs.length).toBeLessThanOrEqual(4);
+    expect(freqs).toContain(440); // Target always included
+    // All frequencies should correspond to allowed notes
+    const allowedFreqs = allowed.map(
+      (n) => ALL_MAPPINGS.find((m) => m.note === n)?.frequency
+    );
+    for (const freq of freqs) {
+      expect(allowedFreqs).toContain(freq);
+    }
   });
 });
 

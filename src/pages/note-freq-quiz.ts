@@ -22,6 +22,7 @@ import {
   getFrequencyForNote,
   getNearbyNotes,
   getNearbyFrequencies,
+  getIntroducedNotes,
   NoteFreqMemoryState,
   SessionCards,
   QuizDirection,
@@ -40,6 +41,7 @@ interface ExerciseState {
   memoryState: NoteFreqMemoryState;
   sessionCards: SessionCards;
   allCards: CurrentCard[]; // All cards for this session
+  allowedNotes: string[]; // Notes that can appear as choices (introduced + session new)
   correctCounts: Map<string, number>; // key = "note:direction"
   currentCard: CurrentCard;
   currentChoices: (string | number)[]; // Note names or frequencies
@@ -151,13 +153,13 @@ function pickNextCard(
   return needsWork[0];
 }
 
-function getChoices(card: CurrentCard): (string | number)[] {
+function getChoices(card: CurrentCard, allowedNotes: string[]): (string | number)[] {
   if (card.direction === "freqToNote") {
     // Question: "This is 440Hz. Which note?" → choices are note names
-    return getNearbyNotes(card.note, 4);
+    return getNearbyNotes(card.note, 4, allowedNotes);
   } else {
     // Question: "This is A4. Which frequency?" → choices are frequencies
-    return getNearbyFrequencies(card.frequency, 4);
+    return getNearbyFrequencies(card.frequency, 4, allowedNotes);
   }
 }
 
@@ -165,6 +167,10 @@ function initExercise(): void {
   const memoryState = loadState();
   const sessionCards = selectSessionCards(memoryState);
   const allCards = buildSessionCards(sessionCards);
+
+  // Allowed notes = already introduced + notes being introduced this session
+  const introducedNotes = getIntroducedNotes(memoryState);
+  const allowedNotes = [...new Set([...introducedNotes, ...sessionCards.newNotes])];
 
   const correctCounts = new Map<string, number>();
   for (const card of allCards) {
@@ -176,9 +182,10 @@ function initExercise(): void {
     memoryState,
     sessionCards,
     allCards,
+    allowedNotes,
     correctCounts,
     currentCard: firstCard,
-    currentChoices: getChoices(firstCard),
+    currentChoices: getChoices(firstCard, allowedNotes),
     eliminatedChoices: new Set(),
     guessHistory: [],
     hasAnswered: false,
@@ -324,7 +331,7 @@ function advanceToNext(): void {
   const nextCard = pickNextCard(state.allCards, state.correctCounts, currentKey);
 
   state.currentCard = nextCard;
-  state.currentChoices = getChoices(nextCard);
+  state.currentChoices = getChoices(nextCard, state.allowedNotes);
   state.eliminatedChoices = new Set();
   state.guessHistory = [];
   state.hasAnswered = false;

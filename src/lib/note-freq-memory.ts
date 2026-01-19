@@ -370,13 +370,18 @@ export function getFrequencyForNote(note: string): number {
 
 /**
  * Get nearby notes for choice generation (returns notes sorted chromatically).
+ * If allowedNotes is provided, only picks from those notes (plus the target).
  */
 export function getNearbyNotes(
   targetNote: string,
-  count: number = 4
+  count: number = 4,
+  allowedNotes?: string[]
 ): string[] {
   const targetIndex = NOTE_NAMES_IN_ORDER.indexOf(targetNote);
   if (targetIndex === -1) return [targetNote];
+
+  // If allowed notes specified, filter to those (plus always include target)
+  const allowedSet = allowedNotes ? new Set([...allowedNotes, targetNote]) : null;
 
   const choices = [targetNote];
   let offset = 1;
@@ -384,10 +389,16 @@ export function getNearbyNotes(
   // Add notes alternating above and below
   while (choices.length < count && offset < NOTE_NAMES_IN_ORDER.length) {
     if (targetIndex + offset < NOTE_NAMES_IN_ORDER.length) {
-      choices.push(NOTE_NAMES_IN_ORDER[targetIndex + offset]);
+      const note = NOTE_NAMES_IN_ORDER[targetIndex + offset];
+      if (!allowedSet || allowedSet.has(note)) {
+        choices.push(note);
+      }
     }
     if (choices.length < count && targetIndex - offset >= 0) {
-      choices.push(NOTE_NAMES_IN_ORDER[targetIndex - offset]);
+      const note = NOTE_NAMES_IN_ORDER[targetIndex - offset];
+      if (!allowedSet || allowedSet.has(note)) {
+        choices.push(note);
+      }
     }
     offset++;
   }
@@ -400,12 +411,25 @@ export function getNearbyNotes(
 
 /**
  * Get nearby frequencies for choice generation (returns frequencies sorted ascending).
+ * If allowedNotes is provided, only picks frequencies for those notes (plus the target).
  */
 export function getNearbyFrequencies(
   targetFreq: number,
-  count: number = 4
+  count: number = 4,
+  allowedNotes?: string[]
 ): number[] {
-  const allFreqs = ALL_MAPPINGS.map((m) => m.frequency).sort((a, b) => a - b);
+  // Get allowed frequencies from allowed notes
+  let allFreqs: number[];
+  if (allowedNotes) {
+    const targetNote = ALL_MAPPINGS.find((m) => m.frequency === targetFreq)?.note;
+    const allowedSet = new Set([...allowedNotes, targetNote].filter(Boolean));
+    allFreqs = ALL_MAPPINGS.filter((m) => allowedSet.has(m.note))
+      .map((m) => m.frequency)
+      .sort((a, b) => a - b);
+  } else {
+    allFreqs = ALL_MAPPINGS.map((m) => m.frequency).sort((a, b) => a - b);
+  }
+
   const targetIndex = allFreqs.indexOf(targetFreq);
   if (targetIndex === -1) return [targetFreq];
 
