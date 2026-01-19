@@ -1,10 +1,11 @@
 /**
- * Ratio Range Exercise
+ * Interval Range Exercise
  *
- * Two tones play and the user places a range bar on a ratio scale to estimate
- * the ratio between them. Similar to frequency-range but for ratios.
+ * Two tones play and the user places a range bar on a semitone scale to estimate
+ * the interval between them (second tone relative to first).
  *
- * The ratio is displayed on a log scale from 1.0 to 3.0 (about 1.5 octaves).
+ * The scale shows semitones from -19 to +19 (about 1.5 octaves each direction).
+ * Positive = second tone is higher, negative = second tone is lower.
  * Difficulty adapts by narrowing the bar width.
  */
 
@@ -14,22 +15,21 @@ import { loadDifficulty, saveDifficulty } from "../lib/storage.js";
 const MIN_FREQ = 128;
 const MAX_FREQ = 1024;
 const LOG_MIN = Math.log2(MIN_FREQ);
+const LOG_MAX = Math.log2(MAX_FREQ);
 
 const NOTE_DURATION = 0.6;
 const NOTE_GAP = 0.3;
 const AUTO_ADVANCE_DELAY = 1000;
 
-// Ratio scale: 1.0 to 3.0 (log scale)
-const MIN_RATIO = 1.0;
-const MAX_RATIO = 3.0;
-const RATIO_LOG_MIN = Math.log2(MIN_RATIO); // 0
-const RATIO_LOG_MAX = Math.log2(MAX_RATIO); // ~1.585
-const RATIO_LOG_RANGE = RATIO_LOG_MAX - RATIO_LOG_MIN;
+// Semitone scale: -19 to +19 semitones
+const MIN_SEMITONES = -19;
+const MAX_SEMITONES = 19;
+const SEMITONE_RANGE = MAX_SEMITONES - MIN_SEMITONES; // 38
 
-// Adaptive difficulty parameters (similar to frequency-range)
-const INITIAL_BAR_WIDTH = 0.4; // In log2 ratio units (~1.32x range)
-const MIN_BAR_WIDTH = 0.05; // Very narrow (~1.035x range)
-const MAX_BAR_WIDTH = 0.4; // Maximum width
+// Adaptive difficulty parameters
+const INITIAL_BAR_WIDTH = 6; // In semitones
+const MIN_BAR_WIDTH = 1; // 1 semitone (very hard)
+const MAX_BAR_WIDTH = 6; // 6 semitones
 const WARMUP_ROUNDS = 5;
 const TARGET_SUCCESS_RATE = 0.85;
 const DECAY_FACTOR = 0.97;
@@ -37,8 +37,8 @@ const MAX_SHRINK_RATE = 0.9;
 const MAX_GROW_RATE = 1.2;
 
 interface HistoryMarker {
-  ratio: number;
-  logPos: number; // 0-1 position on scale
+  semitones: number;
+  position: number; // 0-1 position on scale
   age: number;
   result: "correct" | "low" | "high";
   guessPosition: number;
@@ -46,11 +46,11 @@ interface HistoryMarker {
 
 interface ExerciseState {
   frequencies: [number, number];
-  currentRatio: number;
-  selectedPosition: number; // 0-1 on the ratio scale
+  currentSemitones: number; // Interval in semitones (positive = second higher)
+  selectedPosition: number; // 0-1 on the scale
   hasAnswered: boolean;
   wasCorrect: boolean | null;
-  barWidth: number; // In log2 ratio units
+  barWidth: number; // In semitones
   totalCorrect: number;
   totalAttempts: number;
   streak: number;
@@ -62,57 +62,67 @@ interface ExerciseState {
 let state: ExerciseState;
 let keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
 
-function ratioToLogPosition(ratio: number): number {
-  return (Math.log2(ratio) - RATIO_LOG_MIN) / RATIO_LOG_RANGE;
+function semitonesToPosition(semitones: number): number {
+  return (semitones - MIN_SEMITONES) / SEMITONE_RANGE;
 }
 
-function logPositionToRatio(pos: number): number {
-  return Math.pow(2, pos * RATIO_LOG_RANGE + RATIO_LOG_MIN);
-}
-
-function getBarWidth(): number {
-  return state.barWidth;
+function positionToSemitones(pos: number): number {
+  return pos * SEMITONE_RANGE + MIN_SEMITONES;
 }
 
 function getBarWidthPercent(): number {
-  return (getBarWidth() / RATIO_LOG_RANGE) * 100;
+  return (state.barWidth / SEMITONE_RANGE) * 100;
 }
 
 /**
- * Generate a pair of frequencies with a ratio in our range.
- * Randomly orders them (higher or lower first).
+ * Generate a pair of frequencies with an interval in our range.
  */
 function generateFrequencyPair(): {
   frequencies: [number, number];
-  ratio: number;
+  semitones: number;
 } {
-  // Pick a random ratio in the valid range
-  const ratioLogPos = Math.random();
-  const ratio = logPositionToRatio(ratioLogPos);
+  // Pick a random interval in semitones
+  const semitones =
+    MIN_SEMITONES + Math.random() * SEMITONE_RANGE;
 
-  // Pick a base frequency such that both frequencies fit in range
-  const maxLower = MAX_FREQ / ratio;
-  const logMinLower = LOG_MIN;
-  const logMaxLower = Math.log2(Math.min(maxLower, MAX_FREQ));
+  // Pick a first frequency such that both fit in range
+  const intervalOctaves = semitones / 12;
 
-  const logLower = logMinLower + Math.random() * (logMaxLower - logMinLower);
-  const lowerFreq = Math.pow(2, logLower);
-  const higherFreq = lowerFreq * ratio;
+  // First frequency constraints:
+  // first must be in [MIN_FREQ, MAX_FREQ]
+  // second = first * 2^(semitones/12) must also be in [MIN_FREQ, MAX_FREQ]
+  let minFirstLog = LOG_MIN;
+  let maxFirstLog = LOG_MAX;
+
+  if (semitones > 0) {
+    // Second will be higher, so first can't be too high
+    maxFirstLog = Math.min(maxFirstLog, LOG_MAX - intervalOctaves);
+  } else {
+    // Second will be lower, so first can't be too low
+    minFirstLog = Math.max(minFirstLog, LOG_MIN - intervalOctaves);
+  }
+
+  if (minFirstLog > maxFirstLog) {
+    // Fallback: just use middle of range
+    minFirstLog = (LOG_MIN + LOG_MAX) / 2 - 0.5;
+    maxFirstLog = (LOG_MIN + LOG_MAX) / 2 + 0.5;
+  }
+
+  const firstLog = minFirstLog + Math.random() * (maxFirstLog - minFirstLog);
+  const firstFreq = Math.pow(2, firstLog);
+  const secondFreq = firstFreq * Math.pow(2, semitones / 12);
 
   // Clamp to valid range
-  const clampedLower = Math.max(MIN_FREQ, Math.min(MAX_FREQ, lowerFreq));
-  const clampedHigher = Math.max(MIN_FREQ, Math.min(MAX_FREQ, higherFreq));
+  const clampedFirst = Math.max(MIN_FREQ, Math.min(MAX_FREQ, firstFreq));
+  const clampedSecond = Math.max(MIN_FREQ, Math.min(MAX_FREQ, secondFreq));
 
-  // Recalculate actual ratio
-  const actualRatio = clampedHigher / clampedLower;
+  // Recalculate actual semitones
+  const actualSemitones = 12 * Math.log2(clampedSecond / clampedFirst);
 
-  // Randomly decide order
-  const higherFirst = Math.random() < 0.5;
-  const frequencies: [number, number] = higherFirst
-    ? [clampedHigher, clampedLower]
-    : [clampedLower, clampedHigher];
-
-  return { frequencies, ratio: actualRatio };
+  return {
+    frequencies: [clampedFirst, clampedSecond],
+    semitones: actualSemitones,
+  };
 }
 
 function initExercise(): void {
@@ -124,8 +134,8 @@ function initExercise(): void {
 
   state = {
     frequencies: [0, 0],
-    currentRatio: 1,
-    selectedPosition: 0.5,
+    currentSemitones: 0,
+    selectedPosition: 0.5, // Start at 0 semitones
     hasAnswered: false,
     wasCorrect: null,
     barWidth,
@@ -141,23 +151,23 @@ function initExercise(): void {
 }
 
 function setupNextRound(): void {
-  const { frequencies, ratio } = generateFrequencyPair();
+  const { frequencies, semitones } = generateFrequencyPair();
   state.frequencies = frequencies;
-  state.currentRatio = ratio;
+  state.currentSemitones = semitones;
   state.hasAnswered = false;
   state.wasCorrect = null;
   state.inputEnabled = false;
 }
 
-function getRatioResult(): "correct" | "low" | "high" {
-  const barHalfWidth = getBarWidth() / 2 / RATIO_LOG_RANGE;
-  const ratioLogPos = ratioToLogPosition(state.currentRatio);
+function getResult(): "correct" | "low" | "high" {
+  const barHalfWidth = state.barWidth / 2 / SEMITONE_RANGE;
+  const actualPos = semitonesToPosition(state.currentSemitones);
   const minPos = state.selectedPosition - barHalfWidth;
   const maxPos = state.selectedPosition + barHalfWidth;
 
-  if (ratioLogPos >= minPos && ratioLogPos <= maxPos) {
+  if (actualPos >= minPos && actualPos <= maxPos) {
     return "correct";
-  } else if (ratioLogPos < minPos) {
+  } else if (actualPos < minPos) {
     return "low";
   } else {
     return "high";
@@ -171,7 +181,8 @@ function calculateAdaptiveBarWidth(): number {
 
   const weightedErrors: { error: number; weight: number }[] = state.history.map(
     (h, index) => ({
-      error: Math.abs(h.guessPosition - h.logPos) * RATIO_LOG_RANGE,
+      // Error in semitones
+      error: Math.abs(h.guessPosition - h.position) * SEMITONE_RANGE,
       weight: Math.pow(DECAY_FACTOR, index),
     })
   );
@@ -208,13 +219,13 @@ function handleSubmit(): void {
   if (state.hasAnswered || !state.inputEnabled) return;
 
   state.hasAnswered = true;
-  const result = getRatioResult();
+  const result = getResult();
   state.wasCorrect = result === "correct";
   state.totalAttempts++;
 
   state.history.unshift({
-    ratio: state.currentRatio,
-    logPos: ratioToLogPosition(state.currentRatio),
+    semitones: state.currentSemitones,
+    position: semitonesToPosition(state.currentSemitones),
     age: 0,
     result,
     guessPosition: state.selectedPosition,
@@ -257,8 +268,9 @@ async function playBothFrequencies(): Promise<void> {
   state.inputEnabled = true;
 }
 
-function formatRatio(ratio: number): string {
-  return ratio.toFixed(2) + ":1";
+function formatSemitones(semitones: number): string {
+  const sign = semitones >= 0 ? "+" : "";
+  return `${sign}${semitones.toFixed(1)} st`;
 }
 
 function render(): void {
@@ -267,18 +279,18 @@ function render(): void {
   const barWidthPct = getBarWidthPercent();
   const barLeft = state.selectedPosition * 100 - barWidthPct / 2;
 
-  const barHalfWidth = getBarWidth() / 2 / RATIO_LOG_RANGE;
-  const minRatio = logPositionToRatio(
+  const barHalfWidth = state.barWidth / 2 / SEMITONE_RANGE;
+  const minSemitones = positionToSemitones(
     Math.max(0, state.selectedPosition - barHalfWidth)
   );
-  const maxRatio = logPositionToRatio(
+  const maxSemitones = positionToSemitones(
     Math.min(1, state.selectedPosition + barHalfWidth)
   );
 
   app.innerHTML = `
     <a href="#/" class="back-link">&larr; Back to exercises</a>
-    <h1>Ratio Range</h1>
-    <p>Two tones play. Drag the bar to estimate the ratio between them (higher ÷ lower).</p>
+    <h1>Interval Range</h1>
+    <p>Two tones play. Estimate the interval from first to second (in semitones).</p>
     <p>Press <strong>Space</strong> to check, <strong>R</strong> to replay.</p>
 
     <div class="exercise-container">
@@ -288,23 +300,24 @@ function render(): void {
       </div>
 
       <div class="freq-scale-container">
-        <div class="freq-scale" id="ratio-scale">
-          <div class="freq-bar" id="ratio-bar" style="left: ${barLeft}%; width: ${barWidthPct}%"></div>
+        <div class="freq-scale" id="interval-scale">
+          <div class="freq-bar" id="interval-bar" style="left: ${barLeft}%; width: ${barWidthPct}%"></div>
+          <div class="scale-zero-line" style="left: 50%"></div>
           ${renderHistoryMarkers()}
-          ${state.hasAnswered ? `<div class="freq-marker current" style="left: ${ratioToLogPosition(state.currentRatio) * 100}%"></div>` : ""}
+          ${state.hasAnswered ? `<div class="freq-marker current" style="left: ${semitonesToPosition(state.currentSemitones) * 100}%"></div>` : ""}
         </div>
-        <div class="freq-labels">
-          <span>1.0</span>
-          <span>1.5</span>
-          <span>2.0</span>
-          <span>2.5</span>
-          <span>3.0</span>
+        <div class="freq-labels interval-labels">
+          <span>-19</span>
+          <span>-12</span>
+          <span>0</span>
+          <span>+12</span>
+          <span>+19</span>
         </div>
       </div>
 
       <div class="freq-info">
-        <span>Your range: ${formatRatio(minRatio)} - ${formatRatio(maxRatio)}</span>
-        <span class="freq-level">Range: ${Math.pow(2, state.barWidth).toFixed(2)}x</span>
+        <span>Your range: ${formatSemitones(minSemitones)} to ${formatSemitones(maxSemitones)}</span>
+        <span class="freq-level">Width: ${state.barWidth.toFixed(1)} st</span>
       </div>
 
       <div id="feedback"></div>
@@ -337,7 +350,7 @@ function renderHistoryMarkers(): string {
       const opacity = Math.max(0.1, 1 - m.age / 10);
       const colorClass =
         m.result === "correct" ? "correct" : m.result === "low" ? "low" : "high";
-      return `<div class="freq-marker history ${colorClass}" style="left: ${m.logPos * 100}%; opacity: ${opacity}"></div>`;
+      return `<div class="freq-marker history ${colorClass}" style="left: ${m.position * 100}%; opacity: ${opacity}"></div>`;
     })
     .join("");
 }
@@ -351,13 +364,13 @@ function renderFeedback(): void {
     return;
   }
 
-  const ratioStr = formatRatio(state.currentRatio);
+  const semitoneStr = formatSemitones(state.currentSemitones);
   if (state.wasCorrect) {
     feedback.className = "feedback success fade-out";
-    feedback.textContent = `Correct! The ratio was ${ratioStr}.`;
+    feedback.textContent = `Correct! The interval was ${semitoneStr}.`;
   } else {
     feedback.className = "feedback error fade-out";
-    feedback.textContent = `Wrong! The ratio was ${ratioStr}.`;
+    feedback.textContent = `Wrong! The interval was ${semitoneStr}.`;
   }
 }
 
@@ -372,8 +385,8 @@ function setupEventListeners(): void {
   const submitBtn = document.getElementById("submit-btn");
   submitBtn?.addEventListener("click", handleSubmit);
 
-  const scale = document.getElementById("ratio-scale");
-  const bar = document.getElementById("ratio-bar");
+  const scale = document.getElementById("interval-scale");
+  const bar = document.getElementById("interval-bar");
 
   if (scale && bar) {
     const updatePosition = (clientX: number) => {
@@ -391,16 +404,16 @@ function setupEventListeners(): void {
       const barWidthPct = getBarWidthPercent();
       bar.style.left = `${state.selectedPosition * 100 - barWidthPct / 2}%`;
 
-      const barHalfWidthLog = getBarWidth() / 2 / RATIO_LOG_RANGE;
-      const minRatio = logPositionToRatio(
-        Math.max(0, state.selectedPosition - barHalfWidthLog)
+      const barHalfWidthSt = state.barWidth / 2 / SEMITONE_RANGE;
+      const minSemitones = positionToSemitones(
+        Math.max(0, state.selectedPosition - barHalfWidthSt)
       );
-      const maxRatio = logPositionToRatio(
-        Math.min(1, state.selectedPosition + barHalfWidthLog)
+      const maxSemitones = positionToSemitones(
+        Math.min(1, state.selectedPosition + barHalfWidthSt)
       );
       const freqInfo = document.querySelector(".freq-info span");
       if (freqInfo) {
-        freqInfo.textContent = `Your range: ${formatRatio(minRatio)} - ${formatRatio(maxRatio)}`;
+        freqInfo.textContent = `Your range: ${formatSemitones(minSemitones)} to ${formatSemitones(maxSemitones)}`;
       }
     };
 

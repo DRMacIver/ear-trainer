@@ -798,6 +798,16 @@ a:hover {
   background: #2196f3; /* Blue - actual frequency was higher than guess */
 }
 
+.scale-zero-line {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.3);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
 .freq-labels {
   display: flex;
   justify-content: space-between;

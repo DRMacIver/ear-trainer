@@ -120,10 +120,10 @@ export function renderIndex(): void {
       </li>
       <li>
         <a href="#/exercises/ratio-range">
-          <div class="title">Ratio Range</div>
+          <div class="title">Interval Range</div>
           <div class="description">
-            Two tones play - place your range bar to estimate the ratio between them.
-            Like Frequency Range, but for ratios between two sounds.
+            Two tones play - estimate the interval in semitones from first to second.
+            Positive = second is higher, negative = second is lower.
           </div>
         </a>
       </li>
