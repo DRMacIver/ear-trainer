@@ -3,64 +3,46 @@
  *
  * A tone plays and a frequency is displayed. The user must determine if the
  * played tone is higher, lower, or about the same as the displayed frequency.
- * "About the same" is valid when within a semitone (ratio < 2^(1/12)).
+ * "About the same" is valid when within half a semitone.
  *
- * Difficulty adapts based on how close the frequencies are, while keeping
- * "about the same" answers to roughly 10% of rounds.
+ * The same tone continues until you get it wrong or correctly identify "same".
+ * Each correct answer narrows the known bounds, with the next displayed
+ * frequency chosen uniformly in log-space within those bounds.
  */
 
 import { playFrequency } from "../audio.js";
-import { loadDifficulty, saveDifficulty } from "../lib/storage.js";
 
 const MIN_FREQ = 128;
 const MAX_FREQ = 1024;
+const LOG_MIN = Math.log2(MIN_FREQ);
+const LOG_MAX = Math.log2(MAX_FREQ);
 
 const NOTE_DURATION = 0.8;
 const AUTO_ADVANCE_DELAY = 1000;
 
-// A semitone is 2^(1/12) ≈ 1.0595
-const SEMITONE_LOG = 1 / 12; // In log2 units (octaves)
-
-// Difficulty parameters
-// Difficulty is measured as minimum ratio between played and displayed
-// Higher difficulty = closer frequencies = harder to distinguish
-const INITIAL_DIFFICULTY = 0.15; // ~2.6 semitones apart minimum
-const MIN_DIFFICULTY = 0.05; // ~0.9 semitones (very easy, always distinguishable)
-const MAX_DIFFICULTY = 0.08; // ~1.4 semitones (hard, close to "same" threshold)
-const WARMUP_ROUNDS = 5;
-const TARGET_SUCCESS_RATE = 0.85;
-const DECAY_FACTOR = 0.97;
-const MAX_SHRINK_RATE = 0.9;
-const MAX_GROW_RATE = 1.2;
-
-// Probability of "about the same" being the correct answer
-const SAME_PROBABILITY = 0.10;
-
-// Musical note frequencies (A4 = 440Hz, using equal temperament)
-const A4_FREQ = 440;
-
-interface HistoryEntry {
-  playedFreq: number;
-  displayedFreq: number;
-  correctAnswer: "higher" | "lower" | "same";
-  userAnswer: "higher" | "lower" | "same";
-  correct: boolean;
-  difficulty: number; // The ratio at the time
-}
+// Half a semitone threshold for "about the same"
+const SAME_THRESHOLD_LOG = 1 / 24; // Half semitone in log2 units (octaves)
 
 interface ExerciseState {
+  // The frequency being played (stays same until sequence ends)
   playedFrequency: number;
+  playedFrequencyLog: number;
+  // Current displayed frequency for this round
   displayedFrequency: number;
+  // Known bounds for the played frequency (in log2 space)
+  lowerBoundLog: number;
+  upperBoundLog: number;
+  // Current round state
   correctAnswer: "higher" | "lower" | "same";
   hasAnswered: boolean;
   wasCorrect: boolean | null;
   userAnswer: "higher" | "lower" | "same" | null;
-  // Difficulty: minimum log ratio (smaller = harder)
-  minLogRatio: number;
+  // Stats
   totalCorrect: number;
   totalAttempts: number;
   streak: number;
-  history: HistoryEntry[];
+  sequenceLength: number; // How many correct in current sequence
+  bestSequence: number;
   inputEnabled: boolean;
 }
 
@@ -68,175 +50,73 @@ let state: ExerciseState;
 let keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
 
 /**
- * Get a frequency near a musical note.
- * Returns a frequency that's close to an equal temperament note.
+ * Pick a random frequency uniform in log space.
  */
-function getFrequencyNearMusicalNote(): number {
-  // Pick a random note within our frequency range
-  // Notes are A4 * 2^(n/12) for integer n
-  // Find n range: 128 = 440 * 2^(n/12) => n = 12 * log2(128/440) ≈ -21
-  //               1024 = 440 * 2^(n/12) => n = 12 * log2(1024/440) ≈ 14
-  const minN = Math.ceil(12 * Math.log2(MIN_FREQ / A4_FREQ));
-  const maxN = Math.floor(12 * Math.log2(MAX_FREQ / A4_FREQ));
-
-  const n = minN + Math.floor(Math.random() * (maxN - minN + 1));
-  const exactNoteFreq = A4_FREQ * Math.pow(2, n / 12);
-
-  // Add small random offset (up to 10 cents = 1/10 semitone)
-  const maxOffset = SEMITONE_LOG / 10;
-  const offset = (Math.random() - 0.5) * 2 * maxOffset;
-  const freq = exactNoteFreq * Math.pow(2, offset);
-
-  return Math.max(MIN_FREQ, Math.min(MAX_FREQ, freq));
+function pickRandomLogFrequency(): number {
+  const logPos = LOG_MIN + Math.random() * (LOG_MAX - LOG_MIN);
+  return Math.pow(2, logPos);
 }
 
 /**
- * Generate a round with played and displayed frequencies.
+ * Start a new sequence with a fresh played frequency.
  */
-function generateRound(): {
-  played: number;
-  displayed: number;
-  answer: "higher" | "lower" | "same";
-} {
-  // Decide if this will be a "same" round (~10% of the time)
-  const isSameRound = Math.random() < SAME_PROBABILITY;
+function startNewSequence(): void {
+  state.playedFrequency = pickRandomLogFrequency();
+  state.playedFrequencyLog = Math.log2(state.playedFrequency);
+  state.lowerBoundLog = LOG_MIN;
+  state.upperBoundLog = LOG_MAX;
+  state.sequenceLength = 0;
+}
 
-  // Pick played frequency (biased towards musical notes)
-  const played = getFrequencyNearMusicalNote();
+/**
+ * Generate the next round within the current sequence.
+ * Picks displayed frequency uniformly in log space within current bounds.
+ */
+function generateRound(): void {
+  // Pick displayed frequency uniformly in log space within bounds
+  const displayedLog =
+    state.lowerBoundLog +
+    Math.random() * (state.upperBoundLog - state.lowerBoundLog);
+  state.displayedFrequency = Math.pow(2, displayedLog);
 
-  let displayed: number;
-  let answer: "higher" | "lower" | "same";
+  // Determine correct answer based on distance
+  const diff = state.playedFrequencyLog - displayedLog;
 
-  if (isSameRound) {
-    // Pick displayed within a semitone, but not identical
-    // Random offset between 1Hz and just under a semitone
-    const maxLogOffset = SEMITONE_LOG * 0.95; // Stay safely within semitone
-    const minLogOffset = Math.log2(1 + 1 / played); // At least 1Hz different
-
-    const logOffset =
-      minLogOffset + Math.random() * (maxLogOffset - minLogOffset);
-    const direction = Math.random() < 0.5 ? 1 : -1;
-
-    displayed = played * Math.pow(2, direction * logOffset);
-
-    // Even though they're "about the same", one is still technically higher/lower
-    // The user can answer either "same" or the technically correct direction
-    answer = "same";
+  if (Math.abs(diff) <= SAME_THRESHOLD_LOG) {
+    state.correctAnswer = "same";
+  } else if (diff > 0) {
+    state.correctAnswer = "higher";
   } else {
-    // Pick displayed at least minLogRatio away from played
-    const minOffset = state.minLogRatio;
-    const maxOffset = 0.5; // Half an octave max
-
-    // Ensure we stay outside the semitone range
-    const actualMinOffset = Math.max(minOffset, SEMITONE_LOG * 1.1);
-
-    const logOffset =
-      actualMinOffset + Math.random() * (maxOffset - actualMinOffset);
-    const direction = Math.random() < 0.5 ? 1 : -1;
-
-    displayed = played * Math.pow(2, direction * logOffset);
-
-    // Clamp to valid range
-    if (displayed < MIN_FREQ) {
-      displayed = played * Math.pow(2, logOffset); // Force higher
-    } else if (displayed > MAX_FREQ) {
-      displayed = played * Math.pow(2, -logOffset); // Force lower
-    }
-
-    // Played is higher than displayed => answer is "higher"
-    // Played is lower than displayed => answer is "lower"
-    answer = played > displayed ? "higher" : "lower";
+    state.correctAnswer = "lower";
   }
 
-  // Ensure at least 1Hz difference
-  if (Math.abs(played - displayed) < 1) {
-    displayed = played + (displayed > played ? 1 : -1);
-  }
-
-  return { played, displayed, answer };
-}
-
-function initExercise(): void {
-  const savedDifficulty = loadDifficulty("higher-or-lower", INITIAL_DIFFICULTY);
-  const minLogRatio = Math.max(
-    MIN_DIFFICULTY,
-    Math.min(MAX_DIFFICULTY, savedDifficulty)
-  );
-
-  state = {
-    playedFrequency: 0,
-    displayedFrequency: 0,
-    correctAnswer: "higher",
-    hasAnswered: false,
-    wasCorrect: null,
-    userAnswer: null,
-    minLogRatio,
-    totalCorrect: 0,
-    totalAttempts: 0,
-    streak: 0,
-    history: [],
-    inputEnabled: false,
-  };
-
-  setupNextRound();
-}
-
-function setupNextRound(): void {
-  const round = generateRound();
-  state.playedFrequency = round.played;
-  state.displayedFrequency = round.displayed;
-  state.correctAnswer = round.answer;
   state.hasAnswered = false;
   state.wasCorrect = null;
   state.userAnswer = null;
   state.inputEnabled = false;
 }
 
-/**
- * Calculate adaptive difficulty based on history.
- */
-function calculateAdaptiveDifficulty(): number {
-  if (state.history.length < WARMUP_ROUNDS) {
-    return INITIAL_DIFFICULTY;
-  }
+function initExercise(): void {
+  state = {
+    playedFrequency: 0,
+    playedFrequencyLog: 0,
+    displayedFrequency: 0,
+    lowerBoundLog: LOG_MIN,
+    upperBoundLog: LOG_MAX,
+    correctAnswer: "higher",
+    hasAnswered: false,
+    wasCorrect: null,
+    userAnswer: null,
+    totalCorrect: 0,
+    totalAttempts: 0,
+    streak: 0,
+    sequenceLength: 0,
+    bestSequence: 0,
+    inputEnabled: false,
+  };
 
-  // Only consider non-"same" rounds for difficulty calculation
-  const nonSameHistory = state.history.filter(
-    (h) => h.correctAnswer !== "same"
-  );
-  if (nonSameHistory.length < 3) {
-    return state.minLogRatio;
-  }
-
-  // Calculate weighted success rate
-  const weightedResults = nonSameHistory.map((h, index) => ({
-    correct: h.correct ? 1 : 0,
-    weight: Math.pow(DECAY_FACTOR, index),
-  }));
-
-  const totalWeight = weightedResults.reduce((sum, r) => sum + r.weight, 0);
-  const weightedSuccess =
-    weightedResults.reduce((sum, r) => sum + r.correct * r.weight, 0) /
-    totalWeight;
-
-  // Adjust difficulty based on success rate
-  // If doing well (>85%), make it harder (decrease minLogRatio)
-  // If struggling (<70%), make it easier (increase minLogRatio)
-  let targetDifficulty = state.minLogRatio;
-
-  if (weightedSuccess > TARGET_SUCCESS_RATE) {
-    targetDifficulty = state.minLogRatio * 0.95; // Get closer
-  } else if (weightedSuccess < 0.7) {
-    targetDifficulty = state.minLogRatio * 1.1; // Get further apart
-  }
-
-  // Apply rate limits
-  const minNew = state.minLogRatio * MAX_SHRINK_RATE;
-  const maxNew = state.minLogRatio * MAX_GROW_RATE;
-  targetDifficulty = Math.max(minNew, Math.min(maxNew, targetDifficulty));
-
-  // Clamp to bounds
-  return Math.max(MIN_DIFFICULTY, Math.min(MAX_DIFFICULTY, targetDifficulty));
+  startNewSequence();
+  generateRound();
 }
 
 function handleAnswer(answer: "higher" | "lower" | "same"): void {
@@ -244,45 +124,52 @@ function handleAnswer(answer: "higher" | "lower" | "same"): void {
 
   state.hasAnswered = true;
   state.userAnswer = answer;
-
-  // For "same" rounds, accept either "same" or the technically correct direction
-  if (state.correctAnswer === "same") {
-    const technicallyCorrect =
-      state.playedFrequency > state.displayedFrequency ? "higher" : "lower";
-    state.wasCorrect = answer === "same" || answer === technicallyCorrect;
-  } else {
-    state.wasCorrect = answer === state.correctAnswer;
-  }
-
   state.totalAttempts++;
 
-  // Record history
-  state.history.unshift({
-    playedFreq: state.playedFrequency,
-    displayedFreq: state.displayedFrequency,
-    correctAnswer: state.correctAnswer,
-    userAnswer: answer,
-    correct: state.wasCorrect,
-    difficulty: state.minLogRatio,
-  });
+  // Check if correct
+  // For "same" rounds, only "same" is correct
+  // For higher/lower rounds, only the exact answer is correct
+  state.wasCorrect = answer === state.correctAnswer;
 
   if (state.wasCorrect) {
     state.totalCorrect++;
     state.streak++;
+    state.sequenceLength++;
+
+    if (state.sequenceLength > state.bestSequence) {
+      state.bestSequence = state.sequenceLength;
+    }
   } else {
     state.streak = 0;
   }
-
-  // Update difficulty
-  state.minLogRatio = calculateAdaptiveDifficulty();
-  saveDifficulty("higher-or-lower", state.minLogRatio);
 
   render();
   setTimeout(advanceToNext, AUTO_ADVANCE_DELAY);
 }
 
 async function advanceToNext(): Promise<void> {
-  setupNextRound();
+  // Decide whether to continue sequence or start fresh
+  const sequenceEnds =
+    !state.wasCorrect ||
+    (state.wasCorrect && state.correctAnswer === "same");
+
+  if (sequenceEnds) {
+    // Start a completely new sequence
+    startNewSequence();
+  } else {
+    // Continue sequence: narrow bounds based on answer
+    const displayedLog = Math.log2(state.displayedFrequency);
+
+    if (state.userAnswer === "higher") {
+      // Played is higher than displayed, so displayed is new lower bound
+      state.lowerBoundLog = displayedLog;
+    } else if (state.userAnswer === "lower") {
+      // Played is lower than displayed, so displayed is new upper bound
+      state.upperBoundLog = displayedLog;
+    }
+  }
+
+  generateRound();
   render();
   await playCurrentFrequency();
   state.inputEnabled = true;
@@ -302,6 +189,11 @@ function formatFrequency(freq: number): string {
 function render(): void {
   const app = document.getElementById("app")!;
 
+  // Show current narrowed range
+  const rangeLow = Math.pow(2, state.lowerBoundLog);
+  const rangeHigh = Math.pow(2, state.upperBoundLog);
+  const rangeRatio = rangeHigh / rangeLow;
+
   app.innerHTML = `
     <a href="#/" class="back-link">&larr; Back to exercises</a>
     <h1>Higher or Lower</h1>
@@ -318,15 +210,19 @@ function render(): void {
       </div>
 
       <div class="choice-buttons" id="choice-buttons">
-        <button class="choice-btn${state.hasAnswered && state.userAnswer === "lower" ? (state.wasCorrect || state.correctAnswer === "lower" ? " correct" : " incorrect") : ""}${state.hasAnswered && state.correctAnswer === "lower" && state.userAnswer !== "lower" ? " correct" : ""}" data-answer="lower">
+        <button class="choice-btn${state.hasAnswered && state.userAnswer === "lower" ? (state.wasCorrect ? " correct" : " incorrect") : ""}${state.hasAnswered && state.correctAnswer === "lower" && state.userAnswer !== "lower" ? " correct" : ""}" data-answer="lower">
           Lower
         </button>
         <button class="choice-btn${state.hasAnswered && state.userAnswer === "same" ? (state.wasCorrect ? " correct" : " incorrect") : ""}${state.hasAnswered && state.correctAnswer === "same" && state.userAnswer !== "same" ? " correct" : ""}" data-answer="same">
           Same
         </button>
-        <button class="choice-btn${state.hasAnswered && state.userAnswer === "higher" ? (state.wasCorrect || state.correctAnswer === "higher" ? " correct" : " incorrect") : ""}${state.hasAnswered && state.correctAnswer === "higher" && state.userAnswer !== "higher" ? " correct" : ""}" data-answer="higher">
+        <button class="choice-btn${state.hasAnswered && state.userAnswer === "higher" ? (state.wasCorrect ? " correct" : " incorrect") : ""}${state.hasAnswered && state.correctAnswer === "higher" && state.userAnswer !== "higher" ? " correct" : ""}" data-answer="higher">
           Higher
         </button>
+      </div>
+
+      <div class="range-info">
+        <span>Known range: ${formatFrequency(rangeLow)} - ${formatFrequency(rangeHigh)} (${rangeRatio.toFixed(1)}x)</span>
       </div>
 
       <div id="feedback"></div>
@@ -345,8 +241,12 @@ function render(): void {
           <span>${state.streak}${state.streak >= 5 ? " \u{1F525}" : ""}</span>
         </div>
         <div class="stats">
-          <span class="stats-label">Gap:</span>
-          <span>${(state.minLogRatio * 12).toFixed(1)} st</span>
+          <span class="stats-label">Run:</span>
+          <span>${state.sequenceLength}</span>
+        </div>
+        <div class="stats">
+          <span class="stats-label">Best:</span>
+          <span>${state.bestSequence}</span>
         </div>
       </div>
     </div>
@@ -368,17 +268,21 @@ function renderFeedback(): void {
   const playedStr = formatFrequency(state.playedFrequency);
   const ratio = state.playedFrequency / state.displayedFrequency;
   const semitones = Math.abs(12 * Math.log2(ratio)).toFixed(1);
+  const direction =
+    state.playedFrequency > state.displayedFrequency ? "higher" : "lower";
 
   if (state.wasCorrect) {
     feedback.className = "feedback success fade-out";
-    feedback.textContent = `Correct! The tone was ${playedStr} (${semitones} semitones ${state.playedFrequency > state.displayedFrequency ? "higher" : "lower"}).`;
+    if (state.correctAnswer === "same") {
+      feedback.textContent = `Correct! The tone was ${playedStr} (${semitones} semitones ${direction}). New tone!`;
+    } else {
+      feedback.textContent = `Correct! The tone was ${playedStr} (${semitones} semitones ${direction}).`;
+    }
   } else {
     const correctDesc =
-      state.correctAnswer === "same"
-        ? "about the same"
-        : state.correctAnswer;
+      state.correctAnswer === "same" ? "about the same" : state.correctAnswer;
     feedback.className = "feedback error fade-out";
-    feedback.textContent = `Wrong! The tone was ${playedStr} (${correctDesc}, ${semitones} semitones apart).`;
+    feedback.textContent = `Wrong! The tone was ${playedStr} (${correctDesc}, ${semitones} semitones ${direction}). New tone!`;
   }
 }
 

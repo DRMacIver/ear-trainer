@@ -867,6 +867,13 @@ a:hover {
   color: #e57373;
 }
 
+.range-info {
+  text-align: center;
+  margin: 1rem 0;
+  color: #aaa;
+  font-size: 0.9rem;
+}
+
 /* Frequency Multiple Choice */
 .freq-choices,
 .ratio-choices {
