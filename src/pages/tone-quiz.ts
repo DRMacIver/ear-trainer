@@ -36,17 +36,13 @@ let persistentState: ToneQuizState;
 let question: QuestionState;
 let keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
 
-function randomOctave(): number {
-  return 3 + Math.floor(Math.random() * 3); // 3, 4, or 5
-}
-
 function initQuestion(): void {
   const [familyA, familyB] = pickRandomPair();
   const targetNote = pickTargetNote(familyA, familyB);
 
-  // Random octave for each note (3, 4, or 5)
-  const noteAWithOctave = `${familyA}${randomOctave()}`;
-  const noteBWithOctave = `${familyB}${randomOctave()}`;
+  // All notes in octave 4
+  const noteAWithOctave = `${familyA}4`;
+  const noteBWithOctave = `${familyB}4`;
 
   // Randomize which plays first
   const [first, second] = randomizeOrder(
