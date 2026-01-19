@@ -313,14 +313,16 @@ function renderFeedback(): void {
   if (state.wasCorrect) {
     feedback.className = "feedback success fade-out";
     if (state.correctAnswer === "same") {
-      feedback.textContent = `Correct! The tone was ${playedStr} (${semitones} semitones ${direction}). New tone!`;
+      // Sequence ends - reveal the frequency
+      feedback.textContent = `Correct! The tone was ${playedStr}. New tone!`;
     } else {
-      feedback.textContent = `Correct! The tone was ${playedStr} (${semitones} semitones ${direction}).`;
+      // Sequence continues - don't reveal the frequency
+      feedback.textContent = `Correct!`;
     }
   } else if (state.wasTightRange) {
-    // Wrong but range was tight - counts as success
+    // Wrong but range was tight - counts as success, sequence ends
     feedback.className = "feedback success fade-out";
-    feedback.textContent = `Close enough! The tone was ${playedStr} (${semitones} semitones ${direction}). New tone!`;
+    feedback.textContent = `Close enough! The tone was ${playedStr}. New tone!`;
   } else {
     const correctDesc =
       state.correctAnswer === "same" ? "about the same" : state.correctAnswer;
