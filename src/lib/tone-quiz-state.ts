@@ -312,12 +312,13 @@ export function selectOtherNote(
 /**
  * Select target note, respecting stickiness.
  * Stays on same target until user gets STREAK_LENGTH correct in a row.
- * Returns [target, octave, isNewTarget, isFirstOnTarget, updatedState]
+ * Returns [target, octave, isNewTarget, isFirstOnTarget, updatedState, introducedNote]
+ * where introducedNote is the newly added vocabulary note (or null).
  */
 export function selectTargetNote(
   state: ToneQuizState,
   pickOctave: (note: FullTone) => number
-): [FullTone, number, boolean, boolean, ToneQuizState] {
+): [FullTone, number, boolean, boolean, ToneQuizState, FullTone | null] {
   // Check if we should continue with current target (haven't got 3 correct yet)
   if (
     state.currentTarget &&
@@ -331,13 +332,14 @@ export function selectTargetNote(
       false,
       isFirst,
       { ...state, isFirstOnTarget: false },
+      null,
     ];
   }
 
   // Got 3 correct in a row (or first time) - pick a new target
   // Check if we should add a new note to vocabulary
   let newVocabulary = state.learningVocabulary;
-  let shouldResetCandidateTracking = false;
+  let introducedNote: FullTone | null = null;
   const nextNote = getNextNoteToLearn(state);
 
   if (nextNote) {
@@ -350,7 +352,7 @@ export function selectTargetNote(
 
     if (readyByStreak || readyByTime) {
       newVocabulary = [...state.learningVocabulary, nextNote];
-      shouldResetCandidateTracking = true;
+      introducedNote = nextNote;
     }
   }
 
@@ -377,11 +379,12 @@ export function selectTargetNote(
       correctStreak: 0,
       isFirstOnTarget: false,
       // Reset candidate tracking when a new note is introduced
-      candidateStreaks: shouldResetCandidateTracking ? {} : state.candidateStreaks,
-      questionsSinceLastIntroduction: shouldResetCandidateTracking
+      candidateStreaks: introducedNote ? {} : state.candidateStreaks,
+      questionsSinceLastIntroduction: introducedNote
         ? 0
         : state.questionsSinceLastIntroduction,
     },
+    introducedNote,
   ];
 }
 
