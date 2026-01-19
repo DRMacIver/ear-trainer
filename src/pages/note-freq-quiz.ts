@@ -302,7 +302,8 @@ function handleAnswer(answer: string | number): void {
           "A#",
           "B",
         ];
-        const getIndex = (n: string) => noteOrder.indexOf(n.replace(/\d+$/, ""));
+        const getIndex = (n: string) =>
+          noteOrder.indexOf(n.replace(/\d+$/, ""));
         const choiceIdx = getIndex(choice as string);
         const answerIdx = getIndex(answer as string);
         if (isTooHigh && choiceIdx >= answerIdx) {
@@ -368,7 +369,11 @@ function advanceToNext(): void {
     state.currentCard.note,
     state.currentCard.direction
   );
-  const nextCard = pickNextCard(state.allCards, state.correctCounts, currentKey);
+  const nextCard = pickNextCard(
+    state.allCards,
+    state.correctCounts,
+    currentKey
+  );
 
   state.currentCard = nextCard;
   state.currentChoices = getChoices(nextCard, state.allowedNotes);

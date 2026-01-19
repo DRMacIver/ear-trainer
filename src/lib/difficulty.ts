@@ -16,7 +16,7 @@
 const INITIAL_EMA = 0.85;
 const SMOOTHING_FACTOR = 0.05;
 const PROMOTION_THRESHOLD = 0.92;
-const DEMOTION_THRESHOLD = 0.70;
+const DEMOTION_THRESHOLD = 0.7;
 
 export interface DifficultyState {
   level: number;

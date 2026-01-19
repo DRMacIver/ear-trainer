@@ -627,9 +627,7 @@ export function getNearbyFamilies(
   }
 
   // Sort by chromatic order
-  return choices.sort(
-    (a, b) => NOTE_NAMES.indexOf(a) - NOTE_NAMES.indexOf(b)
-  );
+  return choices.sort((a, b) => NOTE_NAMES.indexOf(a) - NOTE_NAMES.indexOf(b));
 }
 
 /**

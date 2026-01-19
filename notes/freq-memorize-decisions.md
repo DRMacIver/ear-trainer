@@ -25,6 +25,7 @@ This document records design decisions made for the frequency memorization exerc
 **Decision**: After wrong guesses, play all choices in order (low to high) with button highlighting, ending with the correct answer repeated.
 
 **Rationale**:
+
 - Focuses on correct information (play all, then emphasize correct)
 - Provides auditory context (hear how the choices compare)
 - Reinforces learning through multiple modalities (visual highlighting + audio)
@@ -35,6 +36,7 @@ This document records design decisions made for the frequency memorization exerc
 **Decision**: If the user needed multiple guesses, automatically grade as "Again" without showing grade buttons.
 
 **Rationale**:
+
 - Simplifies the interface (no decision needed when clearly struggling)
 - Prevents users from "gaming" the system by rating themselves higher than deserved
 - Follows research on hiding meta-information that encourages optimization over learning
@@ -56,6 +58,7 @@ This document records design decisions made for the frequency memorization exerc
 ### 2. Minimal Stats Display
 
 **Decision**: Show only session accuracy, frequencies learned count, and sessions completed. Do not show:
+
 - Current card's state (new/review)
 - Progress toward session completion
 - Individual card correct counts
@@ -93,6 +96,7 @@ This document records design decisions made for the frequency memorization exerc
 **Decision**: Each session introduces 2 new frequencies (one below and one above a familiar "splitting" frequency) plus review cards.
 
 **Rationale**:
+
 - Binary search approach efficiently covers the frequency space
 - Splitting card provides familiar context for new frequencies
 - Interleaving new and review material aids retention

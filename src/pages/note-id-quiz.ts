@@ -123,7 +123,9 @@ function pickNextQuestion(
 ): CurrentQuestion {
   const needsWork = allQuestions.filter((q) => {
     const key = q.card.id;
-    return (correctCounts.get(key) ?? 0) < REQUIRED_CORRECT && key !== excludeId;
+    return (
+      (correctCounts.get(key) ?? 0) < REQUIRED_CORRECT && key !== excludeId
+    );
   });
 
   if (needsWork.length === 0) {
@@ -601,10 +603,7 @@ async function playLearningSequence(): Promise<void> {
   render();
 }
 
-function formatChoice(
-  choice: string | number,
-  questionType: string
-): string {
+function formatChoice(choice: string | number, questionType: string): string {
   if (questionType === "octaveId") {
     return `Octave ${choice}`;
   }
@@ -715,7 +714,8 @@ function render(): void {
     if (state.lastFeedback === "incorrect") {
       feedbackText = "Incorrect";
     } else {
-      feedbackText = state.lastFeedback === "too-high" ? "Too high!" : "Too low!";
+      feedbackText =
+        state.lastFeedback === "too-high" ? "Too high!" : "Too low!";
     }
     feedbackHtml = `<div class="feedback error">${feedbackText}</div>`;
   }
@@ -873,8 +873,7 @@ function setupEventListeners(): void {
   choiceButtons.forEach((btn) => {
     btn.addEventListener("click", () => {
       const choiceStr = (btn as HTMLElement).dataset.choice || "";
-      const isExploration =
-        (btn as HTMLElement).dataset.exploration === "true";
+      const isExploration = (btn as HTMLElement).dataset.exploration === "true";
       const canExploreEliminated =
         (btn as HTMLElement).dataset.exploreEliminated === "true";
       const questionType = state.currentQuestion.card.questionType;

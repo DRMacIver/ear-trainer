@@ -35,7 +35,7 @@ interface HistoryMarker {
   frequency: number;
   logPos: number; // 0-1 position on scale
   age: number; // How many rounds ago (0 = current)
-  result: 'correct' | 'low' | 'high'; // Whether freq was within range, below it, or above it
+  result: "correct" | "low" | "high"; // Whether freq was within range, below it, or above it
   guessPosition: number; // Where the user's bar was centered (0-1)
 }
 
@@ -91,7 +91,10 @@ function initExercise(): void {
   // Load saved bar width, or use initial value
   const savedBarWidth = loadDifficulty("frequency-range", INITIAL_BAR_WIDTH);
   // Clamp to valid range
-  const barWidth = Math.max(MIN_BAR_WIDTH, Math.min(MAX_BAR_WIDTH, savedBarWidth));
+  const barWidth = Math.max(
+    MIN_BAR_WIDTH,
+    Math.min(MAX_BAR_WIDTH, savedBarWidth)
+  );
 
   state = {
     currentFrequency: pickRandomFrequency(),
@@ -110,18 +113,18 @@ function initExercise(): void {
 
 const AUTO_ADVANCE_DELAY = 1000;
 
-function getFrequencyResult(): 'correct' | 'low' | 'high' {
+function getFrequencyResult(): "correct" | "low" | "high" {
   const barHalfWidth = getBarWidth() / 2 / LOG_RANGE;
   const freqLogPos = freqToLogPosition(state.currentFrequency);
   const minPos = state.selectedPosition - barHalfWidth;
   const maxPos = state.selectedPosition + barHalfWidth;
 
   if (freqLogPos >= minPos && freqLogPos <= maxPos) {
-    return 'correct';
+    return "correct";
   } else if (freqLogPos < minPos) {
-    return 'low'; // Actual frequency was lower than the guess range
+    return "low"; // Actual frequency was lower than the guess range
   } else {
-    return 'high'; // Actual frequency was higher than the guess range
+    return "high"; // Actual frequency was higher than the guess range
   }
 }
 
@@ -138,12 +141,14 @@ function calculateAdaptiveBarWidth(): number {
 
   // Calculate error (distance from guess center to actual) for each historical entry
   // Error is in log position units (0-1 scale), convert to octaves
-  const weightedErrors: { error: number; weight: number }[] = state.history.map((h, index) => ({
-    // Error in octaves: how far the actual frequency was from the guess center
-    error: Math.abs(h.guessPosition - h.logPos) * LOG_RANGE,
-    // Exponential decay: older entries (higher index) get less weight
-    weight: Math.pow(DECAY_FACTOR, index),
-  }));
+  const weightedErrors: { error: number; weight: number }[] = state.history.map(
+    (h, index) => ({
+      // Error in octaves: how far the actual frequency was from the guess center
+      error: Math.abs(h.guessPosition - h.logPos) * LOG_RANGE,
+      // Exponential decay: older entries (higher index) get less weight
+      weight: Math.pow(DECAY_FACTOR, index),
+    })
+  );
 
   // Sort by error (smallest first)
   weightedErrors.sort((a, b) => a.error - b.error);
@@ -184,7 +189,7 @@ function handleSubmit(): void {
 
   state.hasAnswered = true;
   const result = getFrequencyResult();
-  state.wasCorrect = result === 'correct';
+  state.wasCorrect = result === "correct";
   state.totalAttempts++;
 
   // Add to history (newest first)
@@ -241,19 +246,25 @@ async function playCurrentFrequency(): Promise<void> {
 }
 
 function formatFrequency(freq: number): string {
-  return freq >= 1000 ? `${(freq / 1000).toFixed(2)}kHz` : `${Math.round(freq)}Hz`;
+  return freq >= 1000
+    ? `${(freq / 1000).toFixed(2)}kHz`
+    : `${Math.round(freq)}Hz`;
 }
 
 function render(): void {
   const app = document.getElementById("app")!;
 
   const barWidthPct = getBarWidthPercent();
-  const barLeft = (state.selectedPosition * 100) - (barWidthPct / 2);
+  const barLeft = state.selectedPosition * 100 - barWidthPct / 2;
 
   // Calculate selected range in Hz
   const barHalfWidth = getBarWidth() / 2 / LOG_RANGE;
-  const minFreq = logPositionToFreq(Math.max(0, state.selectedPosition - barHalfWidth));
-  const maxFreq = logPositionToFreq(Math.min(1, state.selectedPosition + barHalfWidth));
+  const minFreq = logPositionToFreq(
+    Math.max(0, state.selectedPosition - barHalfWidth)
+  );
+  const maxFreq = logPositionToFreq(
+    Math.min(1, state.selectedPosition + barHalfWidth)
+  );
 
   app.innerHTML = `
     <a href="#/" class="back-link">&larr; Back to exercises</a>
@@ -263,14 +274,14 @@ function render(): void {
     <div class="exercise-container">
       <div class="controls">
         <button class="play-again-btn" id="play-btn">Play Again</button>
-        ${!state.hasAnswered ? `<button class="check-button" id="submit-btn">Submit</button>` : ''}
+        ${!state.hasAnswered ? `<button class="check-button" id="submit-btn">Submit</button>` : ""}
       </div>
 
       <div class="freq-scale-container">
         <div class="freq-scale" id="freq-scale">
           <div class="freq-bar" id="freq-bar" style="left: ${barLeft}%; width: ${barWidthPct}%"></div>
           ${renderHistoryMarkers()}
-          ${state.hasAnswered ? `<div class="freq-marker current" style="left: ${freqToLogPosition(state.currentFrequency) * 100}%"></div>` : ''}
+          ${state.hasAnswered ? `<div class="freq-marker current" style="left: ${freqToLogPosition(state.currentFrequency) * 100}%"></div>` : ""}
         </div>
         <div class="freq-labels">
           <span>128Hz</span>
@@ -312,11 +323,16 @@ function renderHistoryMarkers(): string {
   return state.history
     .filter((m) => m.age > 0 && m.age <= 10) // Show last 10, skip current
     .map((m) => {
-      const opacity = Math.max(0.1, 1 - (m.age / 10));
-      const colorClass = m.result === 'correct' ? 'correct' : m.result === 'low' ? 'low' : 'high';
+      const opacity = Math.max(0.1, 1 - m.age / 10);
+      const colorClass =
+        m.result === "correct"
+          ? "correct"
+          : m.result === "low"
+            ? "low"
+            : "high";
       return `<div class="freq-marker history ${colorClass}" style="left: ${m.logPos * 100}%; opacity: ${opacity}"></div>`;
     })
-    .join('');
+    .join("");
 }
 
 function renderFeedback(): void {
@@ -362,16 +378,23 @@ function setupEventListeners(): void {
 
       // Clamp so bar doesn't go off edges
       const barHalfWidth = getBarWidthPercent() / 200;
-      state.selectedPosition = Math.max(barHalfWidth, Math.min(1 - barHalfWidth, pct));
+      state.selectedPosition = Math.max(
+        barHalfWidth,
+        Math.min(1 - barHalfWidth, pct)
+      );
 
       // Update bar position without full re-render
       const barWidthPct = getBarWidthPercent();
-      bar.style.left = `${(state.selectedPosition * 100) - (barWidthPct / 2)}%`;
+      bar.style.left = `${state.selectedPosition * 100 - barWidthPct / 2}%`;
 
       // Update freq info
       const barHalfWidthLog = getBarWidth() / 2 / LOG_RANGE;
-      const minFreq = logPositionToFreq(Math.max(0, state.selectedPosition - barHalfWidthLog));
-      const maxFreq = logPositionToFreq(Math.min(1, state.selectedPosition + barHalfWidthLog));
+      const minFreq = logPositionToFreq(
+        Math.max(0, state.selectedPosition - barHalfWidthLog)
+      );
+      const maxFreq = logPositionToFreq(
+        Math.min(1, state.selectedPosition + barHalfWidthLog)
+      );
       const freqInfo = document.querySelector(".freq-info span");
       if (freqInfo) {
         freqInfo.textContent = `Your range: ${formatFrequency(minFreq)} - ${formatFrequency(maxFreq)}`;
@@ -430,13 +453,19 @@ function setupEventListeners(): void {
       e.preventDefault();
       const step = 0.02;
       const barHalfWidth = getBarWidthPercent() / 200;
-      state.selectedPosition = Math.max(barHalfWidth, state.selectedPosition - step);
+      state.selectedPosition = Math.max(
+        barHalfWidth,
+        state.selectedPosition - step
+      );
       render();
     } else if (e.key === "ArrowRight" && !state.hasAnswered) {
       e.preventDefault();
       const step = 0.02;
       const barHalfWidth = getBarWidthPercent() / 200;
-      state.selectedPosition = Math.min(1 - barHalfWidth, state.selectedPosition + step);
+      state.selectedPosition = Math.min(
+        1 - barHalfWidth,
+        state.selectedPosition + step
+      );
       render();
     }
   };

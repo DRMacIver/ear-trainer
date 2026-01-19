@@ -65,11 +65,34 @@ const NON_OCTAVE_INTERVALS_BY_LEVEL: Record<number, number[]> = {
 
 // All notes with their semitone offset from C
 const NOTE_TO_SEMITONE: Record<string, number> = {
-  C: 0, "C#": 1, D: 2, "D#": 3, E: 4, F: 5,
-  "F#": 6, G: 7, "G#": 8, A: 9, "A#": 10, B: 11,
+  C: 0,
+  "C#": 1,
+  D: 2,
+  "D#": 3,
+  E: 4,
+  F: 5,
+  "F#": 6,
+  G: 7,
+  "G#": 8,
+  A: 9,
+  "A#": 10,
+  B: 11,
 };
 
-const SEMITONE_TO_NOTE = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+const SEMITONE_TO_NOTE = [
+  "C",
+  "C#",
+  "D",
+  "D#",
+  "E",
+  "F",
+  "F#",
+  "G",
+  "G#",
+  "A",
+  "A#",
+  "B",
+];
 
 interface ExerciseState {
   // The two notes being played [low, high]
@@ -105,11 +128,17 @@ let lastSpaceTime = 0;
 const SPACE_DEBOUNCE_MS = 300;
 
 function getBaseNotes(level: number): string[] {
-  return BASE_NOTES_BY_LEVEL[Math.min(level, MAX_LEVEL)] || BASE_NOTES_BY_LEVEL[MAX_LEVEL];
+  return (
+    BASE_NOTES_BY_LEVEL[Math.min(level, MAX_LEVEL)] ||
+    BASE_NOTES_BY_LEVEL[MAX_LEVEL]
+  );
 }
 
 function getNonOctaveIntervals(level: number): number[] {
-  return NON_OCTAVE_INTERVALS_BY_LEVEL[Math.min(level, MAX_LEVEL)] || NON_OCTAVE_INTERVALS_BY_LEVEL[MAX_LEVEL];
+  return (
+    NON_OCTAVE_INTERVALS_BY_LEVEL[Math.min(level, MAX_LEVEL)] ||
+    NON_OCTAVE_INTERVALS_BY_LEVEL[MAX_LEVEL]
+  );
 }
 
 function pickRandom<T>(arr: T[]): T {
@@ -120,7 +149,11 @@ function pickRandom<T>(arr: T[]): T {
  * Generate a note that is `semitones` above the base note.
  * Returns null if the resulting note would be out of our range (octaves 3-5).
  */
-function noteAbove(baseNote: string, baseOctave: number, semitones: number): string | null {
+function noteAbove(
+  baseNote: string,
+  baseOctave: number,
+  semitones: number
+): string | null {
   const baseSemitone = NOTE_TO_SEMITONE[baseNote];
   const totalSemitones = baseSemitone + semitones;
   const newOctave = baseOctave + Math.floor(totalSemitones / 12);
@@ -133,7 +166,11 @@ function noteAbove(baseNote: string, baseOctave: number, semitones: number): str
   return `${newNote}${newOctave}`;
 }
 
-function generateRound(level: number): { notes: [string, string]; isOctave: boolean; interval: number } {
+function generateRound(level: number): {
+  notes: [string, string];
+  isOctave: boolean;
+  interval: number;
+} {
   const baseNotes = getBaseNotes(level);
   const nonOctaveIntervals = getNonOctaveIntervals(level);
 
@@ -149,7 +186,9 @@ function generateRound(level: number): { notes: [string, string]; isOctave: bool
   let attempts = 0;
   while (attempts < 50) {
     const baseNote = pickRandom(baseNotes);
-    const baseOctave = minBaseOctave + Math.floor(Math.random() * (maxBaseOctave - minBaseOctave + 1));
+    const baseOctave =
+      minBaseOctave +
+      Math.floor(Math.random() * (maxBaseOctave - minBaseOctave + 1));
     const lowNote = `${baseNote}${baseOctave}`;
     const highNote = noteAbove(baseNote, baseOctave, interval);
 
@@ -166,7 +205,10 @@ function generateRound(level: number): { notes: [string, string]; isOctave: bool
 function initExercise(): void {
   // Load saved level, clamped to valid range
   const savedLevel = loadDifficulty("octave-or-not", MIN_LEVEL);
-  const startLevel = Math.max(MIN_LEVEL, Math.min(MAX_LEVEL, Math.round(savedLevel)));
+  const startLevel = Math.max(
+    MIN_LEVEL,
+    Math.min(MAX_LEVEL, Math.round(savedLevel))
+  );
 
   const round = generateRound(startLevel);
 
@@ -233,7 +275,9 @@ function handleAnswer(saidOctave: boolean): void {
     prompt: `${state.notes[0]} → ${state.notes[1]}`,
     notes: [...state.notes],
     userAnswer: saidOctave ? "Yes (Octave)" : "No (Not octave)",
-    correctAnswer: state.isOctave ? `Yes (${intervalName})` : `No (${intervalName})`,
+    correctAnswer: state.isOctave
+      ? `Yes (${intervalName})`
+      : `No (${intervalName})`,
     correct: state.wasCorrect,
   });
 

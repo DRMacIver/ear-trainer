@@ -162,7 +162,7 @@ function generateRatioChoices(
         choices.push(fallback);
       } else {
         // Last resort: add a slightly modified ratio
-        choices.push(roundRatio(correctRatio + (choices.length * 0.2)));
+        choices.push(roundRatio(correctRatio + choices.length * 0.2));
       }
     }
   }

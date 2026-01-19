@@ -68,6 +68,7 @@ Source: [Headway - Spaced Repetition App Guide](https://makeheadway.com/blog/spa
 ### FSRS (Free Spaced Repetition Scheduler)
 
 FSRS-5 is a modern algorithm that calculates:
+
 - **Stability (S)**: How long until retrievability drops to 90%
 - **Difficulty (D)**: Inherent difficulty of the card (1-10 scale)
 - **Retrievability**: Probability of recall given time elapsed
@@ -81,6 +82,7 @@ Source: [femto-fsrs on GitHub](https://github.com/open-spaced-repetition/ts-fsrs
 ### Duolingo's Approach
 
 Duolingo uses 22 gamification elements including:
+
 - Progress indicators (daily goals, XP, level unlocking)
 - Fixed reward schedules (experience points)
 - Time-dependent rewards (streaks)

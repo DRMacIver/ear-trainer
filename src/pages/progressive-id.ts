@@ -163,7 +163,10 @@ function selectDifferentiatedNote(existingIndices: number[]): number {
 function initExercise(): void {
   // Load saved level (number of notes), clamped to valid range
   const savedLevel = loadDifficulty("progressive-id", MIN_NOTES);
-  const targetNotes = Math.max(MIN_NOTES, Math.min(MAX_NOTES, Math.round(savedLevel)));
+  const targetNotes = Math.max(
+    MIN_NOTES,
+    Math.min(MAX_NOTES, Math.round(savedLevel))
+  );
 
   // Build note set starting with C4, adding differentiated notes up to target
   const c4Index = getNoteIndex("C4");

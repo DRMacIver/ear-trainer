@@ -166,9 +166,7 @@ async function advanceToNext(): Promise<void> {
   // Decide whether to continue sequence or start fresh
   // Sequence ends on: wrong answer, correct "same", or tight range (even if wrong)
   const sequenceEnds =
-    !state.wasCorrect ||
-    state.correctAnswer === "same" ||
-    state.wasTightRange;
+    !state.wasCorrect || state.correctAnswer === "same" || state.wasTightRange;
 
   if (sequenceEnds) {
     // Start a completely new sequence

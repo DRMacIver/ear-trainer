@@ -10,7 +10,10 @@
  */
 
 import { playFrequency } from "../audio.js";
-import { loadVersionedDifficulty, saveVersionedDifficulty } from "../lib/storage.js";
+import {
+  loadVersionedDifficulty,
+  saveVersionedDifficulty,
+} from "../lib/storage.js";
 
 const MIN_FREQ = 128;
 const MAX_FREQ = 1024;
@@ -142,9 +145,7 @@ function generateChoices(
   }
 
   // Find where the correct answer ended up
-  const correctIndex = choices.findIndex(
-    (c) => Math.abs(c - correct) < 0.01
-  );
+  const correctIndex = choices.findIndex((c) => Math.abs(c - correct) < 0.01);
 
   // Sort choices by frequency for display
   const sortedWithIndices = choices.map((c, i) => ({ freq: c, origIndex: i }));
@@ -217,7 +218,11 @@ function applyDifficultyAdjustment(wasCorrect: boolean): void {
   }
 
   state.level = newLevel;
-  saveVersionedDifficulty("freq-multiple-choice", state.level, EXERCISE_VERSION);
+  saveVersionedDifficulty(
+    "freq-multiple-choice",
+    state.level,
+    EXERCISE_VERSION
+  );
 }
 
 function handleAnswer(chosenIndex: number): void {

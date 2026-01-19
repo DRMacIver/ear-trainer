@@ -339,9 +339,10 @@ function setupEventListeners(): void {
   const choiceButtons = document.querySelectorAll(".tone-choice");
   choiceButtons.forEach((btn) => {
     btn.addEventListener("click", () => {
-      const answer = parseInt((btn as HTMLElement).dataset.answer || "1", 10) as
-        | 1
-        | 2;
+      const answer = parseInt(
+        (btn as HTMLElement).dataset.answer || "1",
+        10
+      ) as 1 | 2;
       handleAnswer(answer);
     });
   });

@@ -9,7 +9,10 @@ const STORAGE_PREFIX = "ear-trainer:";
  */
 export function saveDifficulty(exerciseId: string, value: number): void {
   try {
-    localStorage.setItem(`${STORAGE_PREFIX}difficulty:${exerciseId}`, String(value));
+    localStorage.setItem(
+      `${STORAGE_PREFIX}difficulty:${exerciseId}`,
+      String(value)
+    );
   } catch {
     // localStorage may be unavailable (private browsing, etc.)
   }
@@ -19,9 +22,14 @@ export function saveDifficulty(exerciseId: string, value: number): void {
  * Load a saved difficulty value for an exercise.
  * Returns the default value if not found or on error.
  */
-export function loadDifficulty(exerciseId: string, defaultValue: number): number {
+export function loadDifficulty(
+  exerciseId: string,
+  defaultValue: number
+): number {
   try {
-    const stored = localStorage.getItem(`${STORAGE_PREFIX}difficulty:${exerciseId}`);
+    const stored = localStorage.getItem(
+      `${STORAGE_PREFIX}difficulty:${exerciseId}`
+    );
     if (stored !== null) {
       const parsed = parseFloat(stored);
       if (!isNaN(parsed)) {
@@ -61,7 +69,9 @@ export function loadVersionedDifficulty(
   expectedVersion: number
 ): number {
   try {
-    const stored = localStorage.getItem(`${STORAGE_PREFIX}difficulty:${exerciseId}`);
+    const stored = localStorage.getItem(
+      `${STORAGE_PREFIX}difficulty:${exerciseId}`
+    );
     if (stored !== null) {
       // Try parsing as versioned JSON first
       try {

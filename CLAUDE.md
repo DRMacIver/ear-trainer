@@ -53,6 +53,7 @@ npm run format       # Format code
 ```
 
 Or use just:
+
 ```bash
 just install         # Install dependencies
 just test            # Run tests
@@ -102,6 +103,7 @@ bd sync               # Sync with git
 ```
 
 ### Priority Levels
+
 - P0: Critical (blocking)
 - P1: High
 - P2: Medium (default)

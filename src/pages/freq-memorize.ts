@@ -582,7 +582,10 @@ function setupEventListeners(): void {
     }
 
     // Enter or 'c' to continue after sequence
-    if (state.sequenceComplete && (e.key === "Enter" || e.key === "c" || e.key === "C")) {
+    if (
+      state.sequenceComplete &&
+      (e.key === "Enter" || e.key === "c" || e.key === "C")
+    ) {
       e.preventDefault();
       handleGrade(Grade.AGAIN);
       return;

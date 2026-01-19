@@ -104,7 +104,10 @@ export function playFrequency(
  * Play a note by name (e.g., "A4", "C#4").
  * Returns a Promise that resolves when playback completes.
  */
-export function playNote(note: string, options: PlayOptions = {}): Promise<void> {
+export function playNote(
+  note: string,
+  options: PlayOptions = {}
+): Promise<void> {
   const frequency = NOTE_FREQUENCIES[note];
   if (frequency === undefined) {
     throw new Error(`Unknown note: ${note}`);

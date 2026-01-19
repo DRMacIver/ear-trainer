@@ -5,7 +5,12 @@
  * one is a different note. User identifies which is the odd one.
  */
 
-import { playNote, shuffle, getChromaticIndex, NOTE_FREQUENCIES } from "../audio.js";
+import {
+  playNote,
+  shuffle,
+  getChromaticIndex,
+  NOTE_FREQUENCIES,
+} from "../audio.js";
 import {
   HistoryEntry,
   renderHistorySummary,
@@ -103,8 +108,12 @@ function pickOddOctave(): number {
 /**
  * Sort notes by pitch (frequency) from low to high.
  */
-function sortByPitch(notes: { note: string; isOdd: boolean }[]): { note: string; isOdd: boolean }[] {
-  return [...notes].sort((a, b) => NOTE_FREQUENCIES[a.note] - NOTE_FREQUENCIES[b.note]);
+function sortByPitch(
+  notes: { note: string; isOdd: boolean }[]
+): { note: string; isOdd: boolean }[] {
+  return [...notes].sort(
+    (a, b) => NOTE_FREQUENCIES[a.note] - NOTE_FREQUENCIES[b.note]
+  );
 }
 
 function initExercise(): void {

@@ -81,18 +81,14 @@ export function saveState(state: FreqMemoryState): void {
  * Get frequencies that have been introduced (have card state).
  */
 export function getIntroducedFrequencies(state: FreqMemoryState): number[] {
-  return state.cards
-    .filter((c) => c.card !== null)
-    .map((c) => c.frequency);
+  return state.cards.filter((c) => c.card !== null).map((c) => c.frequency);
 }
 
 /**
  * Get frequencies that haven't been introduced yet.
  */
 export function getNewFrequencies(state: FreqMemoryState): number[] {
-  return state.cards
-    .filter((c) => c.card === null)
-    .map((c) => c.frequency);
+  return state.cards.filter((c) => c.card === null).map((c) => c.frequency);
 }
 
 /**
@@ -217,7 +213,10 @@ function selectReviewSessionCards(state: FreqMemoryState): number[] {
     { low: ALL_FREQUENCIES[0] - 1, high: anchorFreqs[0] },
     { low: anchorFreqs[0], high: anchorFreqs[1] },
     { low: anchorFreqs[1], high: anchorFreqs[2] },
-    { low: anchorFreqs[2], high: ALL_FREQUENCIES[ALL_FREQUENCIES.length - 1] + 1 },
+    {
+      low: anchorFreqs[2],
+      high: ALL_FREQUENCIES[ALL_FREQUENCIES.length - 1] + 1,
+    },
   ];
 
   // Interleave: anchor, filler, anchor, filler, anchor, fillers
@@ -309,9 +308,7 @@ function findBestNewFreqInGap(
 
   // Try to find one that's not within 50Hz of any introduced frequency
   for (const candidate of candidates) {
-    const tooClose = introducedFreqs.some(
-      (f) => Math.abs(f - candidate) <= 50
-    );
+    const tooClose = introducedFreqs.some((f) => Math.abs(f - candidate) <= 50);
     if (!tooClose) return candidate;
   }
 
@@ -549,9 +546,7 @@ export function recordReview(
 /**
  * Increment session count.
  */
-export function incrementSessionCount(
-  state: FreqMemoryState
-): FreqMemoryState {
+export function incrementSessionCount(state: FreqMemoryState): FreqMemoryState {
   return {
     ...state,
     sessionCount: state.sessionCount + 1,

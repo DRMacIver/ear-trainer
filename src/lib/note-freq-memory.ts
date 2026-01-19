@@ -42,7 +42,20 @@ export interface NoteFreqMemoryState {
   sessionCount: number;
 }
 
-const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+const NOTE_NAMES = [
+  "C",
+  "C#",
+  "D",
+  "D#",
+  "E",
+  "F",
+  "F#",
+  "G",
+  "G#",
+  "A",
+  "A#",
+  "B",
+];
 const OCTAVES = [3, 4, 5];
 
 function generateAllMappings(): NoteFreqMapping[] {
@@ -65,17 +78,47 @@ export const ALL_MAPPINGS = generateAllMappings();
 // Introduction order: start with octave 4 non-sharps, then sharps, then expand
 export const INTRODUCTION_ORDER = [
   // Octave 4 non-sharps (well separated)
-  "C4", "A4", "F4", "D4", "G4", "B4", "E4",
+  "C4",
+  "A4",
+  "F4",
+  "D4",
+  "G4",
+  "B4",
+  "E4",
   // Octave 4 sharps
-  "C#4", "F#4", "D#4", "G#4", "A#4",
+  "C#4",
+  "F#4",
+  "D#4",
+  "G#4",
+  "A#4",
   // Octave 3 non-sharps
-  "C3", "A3", "F3", "D3", "G3", "B3", "E3",
+  "C3",
+  "A3",
+  "F3",
+  "D3",
+  "G3",
+  "B3",
+  "E3",
   // Octave 3 sharps
-  "C#3", "F#3", "D#3", "G#3", "A#3",
+  "C#3",
+  "F#3",
+  "D#3",
+  "G#3",
+  "A#3",
   // Octave 5 non-sharps
-  "C5", "A5", "F5", "D5", "G5", "B5", "E5",
+  "C5",
+  "A5",
+  "F5",
+  "D5",
+  "G5",
+  "B5",
+  "E5",
   // Octave 5 sharps
-  "C#5", "F#5", "D#5", "G#5", "A#5",
+  "C#5",
+  "F#5",
+  "D#5",
+  "G#5",
+  "A#5",
 ];
 
 const STORAGE_KEY = "ear-trainer:note-freq-memory-v2";

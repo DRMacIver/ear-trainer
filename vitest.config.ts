@@ -5,12 +5,7 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "html", "json"],
-      exclude: [
-        "node_modules/**",
-        "dist/**",
-        "tests/**",
-        "*.config.*",
-      ],
+      exclude: ["node_modules/**", "dist/**", "tests/**", "*.config.*"],
       thresholds: {
         statements: 100,
         branches: 100,
