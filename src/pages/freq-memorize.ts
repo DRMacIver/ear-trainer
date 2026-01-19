@@ -32,6 +32,7 @@ interface ExerciseState {
   currentQueue: number[]; // Frequencies to practice this session
   currentIndex: number;
   currentFrequency: number;
+  currentChoices: number[]; // Fixed choices for current question
   hasAnswered: boolean;
   wasCorrect: boolean | null;
   userAnswer: number | null;
@@ -71,12 +72,14 @@ function initExercise(): void {
     }
   }
 
+  const firstFreq = queue[0] || 0;
   state = {
     memoryState,
     sessionCards,
     currentQueue: queue,
     currentIndex: 0,
-    currentFrequency: queue[0] || 0,
+    currentFrequency: firstFreq,
+    currentChoices: getChoices(firstFreq),
     hasAnswered: false,
     wasCorrect: null,
     userAnswer: null,
@@ -149,6 +152,7 @@ function handleGrade(grade: Grade): void {
 function advanceToNext(): void {
   const nextFreq = state.currentQueue[state.currentIndex];
   state.currentFrequency = nextFreq;
+  state.currentChoices = getChoices(nextFreq);
   state.hasAnswered = false;
   state.wasCorrect = null;
   state.userAnswer = null;
@@ -171,7 +175,7 @@ function formatFrequency(freq: number): string {
 function render(): void {
   const app = document.getElementById("app")!;
   const stats = getStats(state.memoryState);
-  const choices = getChoices(state.currentFrequency);
+  const choices = state.currentChoices;
 
   const progress = `${state.currentIndex + 1}/${state.currentQueue.length}`;
   const cardType = state.isNewCard ? "NEW" : "Review";
@@ -190,6 +194,13 @@ function render(): void {
     })
     .join("");
 
+  // Only show grade buttons if correct; wrong answers auto-grade as Again
+  const afterAnswer = state.hasAnswered
+    ? state.wasCorrect
+      ? renderGradeButtons()
+      : `<button class="choice-btn" id="next-btn">Next</button>`
+    : "";
+
   app.innerHTML = `
     <a href="#/" class="back-link">&larr; Back to exercises</a>
     <h1>Frequency Memorization</h1>
@@ -205,7 +216,7 @@ function render(): void {
         ${choiceButtons}
       </div>
 
-      ${state.hasAnswered ? renderGradeButtons() : ""}
+      ${afterAnswer}
 
       <div id="feedback"></div>
 
@@ -327,7 +338,7 @@ function setupEventListeners(choices: number[]): void {
     });
   });
 
-  // Grade buttons
+  // Grade buttons (only shown when correct)
   const gradeButtons = document.querySelectorAll(".grade-btn");
   gradeButtons.forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -337,6 +348,12 @@ function setupEventListeners(choices: number[]): void {
       ) as Grade;
       handleGrade(grade);
     });
+  });
+
+  // Next button (shown when wrong - auto-grades as Again)
+  const nextBtn = document.getElementById("next-btn");
+  nextBtn?.addEventListener("click", () => {
+    handleGrade(Grade.AGAIN);
   });
 
   if (keyboardHandler) {
@@ -359,12 +376,18 @@ function setupEventListeners(choices: number[]): void {
         e.preventDefault();
         handleAnswer(choices[num - 1]);
       }
-    } else {
-      // After answering, 1-4 for grades
+    } else if (state.wasCorrect) {
+      // After correct answer, 1-4 for grades
       const num = parseInt(e.key, 10);
       if (num >= 1 && num <= 4) {
         e.preventDefault();
         handleGrade(num as Grade);
+      }
+    } else {
+      // After wrong answer, any key moves on (auto-grade as Again)
+      if (e.key === "Enter" || e.key === " " || (e.key >= "1" && e.key <= "4")) {
+        e.preventDefault();
+        handleGrade(Grade.AGAIN);
       }
     }
   };
