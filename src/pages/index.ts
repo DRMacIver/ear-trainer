@@ -145,6 +145,15 @@ export function renderIndex(): void {
           </div>
         </a>
       </li>
+      <li>
+        <a href="#/exercises/note-freq-quiz">
+          <div class="title">Note-Frequency Quiz</div>
+          <div class="description">
+            Learn the mapping between musical notes (C4-B4) and their frequencies.
+            Quiz goes both ways: "440Hz is which note?" and "A4 is which frequency?"
+          </div>
+        </a>
+      </li>
     </ul>
   `;
 }
