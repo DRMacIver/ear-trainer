@@ -29,8 +29,8 @@ const NOTE_DURATION = 0.8;
 interface ExerciseState {
   memoryState: FreqMemoryState;
   sessionCards: SessionCards;
-  currentQueue: number[]; // Frequencies to practice this session
-  currentIndex: number;
+  allFrequencies: number[]; // All frequencies in this session
+  correctCounts: Map<number, number>; // Correct answers per frequency this session
   currentFrequency: number;
   currentChoices: number[]; // Fixed choices for current question
   hasAnswered: boolean;
@@ -42,6 +42,8 @@ interface ExerciseState {
   isNewCard: boolean;
 }
 
+const REQUIRED_CORRECT = 2; // Each card needs this many correct answers
+
 let state: ExerciseState;
 let keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
 
@@ -49,35 +51,24 @@ function initExercise(): void {
   const memoryState = loadState();
   const sessionCards = selectSessionCards(memoryState);
 
-  // Build queue: new cards first (interleaved), then reviews
-  const queue: number[] = [];
+  // Collect all frequencies for this session
+  const allFrequencies = [
+    ...sessionCards.newCards,
+    ...sessionCards.reviewCards,
+  ].filter((f, i, arr) => arr.indexOf(f) === i); // Dedupe
 
-  // Interleave new cards with reviews for better learning
-  if (sessionCards.isFirstSession) {
-    // First session: just the three initial cards
-    queue.push(...sessionCards.newCards);
-  } else {
-    // Mix: splitting review, new card, review, new card, review
-    if (sessionCards.splittingCard) {
-      queue.push(sessionCards.splittingCard);
-    }
-    if (sessionCards.newCards[0]) queue.push(sessionCards.newCards[0]);
-    if (sessionCards.reviewCards[1]) queue.push(sessionCards.reviewCards[1]);
-    if (sessionCards.newCards[1]) queue.push(sessionCards.newCards[1]);
-    if (sessionCards.reviewCards[2]) queue.push(sessionCards.reviewCards[2]);
-
-    // Add any remaining reviews
-    for (const freq of sessionCards.reviewCards) {
-      if (!queue.includes(freq)) queue.push(freq);
-    }
+  // Initialize correct counts to 0
+  const correctCounts = new Map<number, number>();
+  for (const freq of allFrequencies) {
+    correctCounts.set(freq, 0);
   }
 
-  const firstFreq = queue[0] || 0;
+  const firstFreq = pickNextFrequency(allFrequencies, correctCounts);
   state = {
     memoryState,
     sessionCards,
-    currentQueue: queue,
-    currentIndex: 0,
+    allFrequencies,
+    correctCounts,
     currentFrequency: firstFreq,
     currentChoices: getChoices(firstFreq),
     hasAnswered: false,
@@ -86,8 +77,38 @@ function initExercise(): void {
     sessionCorrect: 0,
     sessionTotal: 0,
     inputEnabled: false,
-    isNewCard: sessionCards.newCards.includes(queue[0]),
+    isNewCard: sessionCards.newCards.includes(firstFreq),
   };
+}
+
+/**
+ * Pick the next frequency to practice.
+ * Prioritizes cards with fewer correct answers, with some randomization.
+ */
+function pickNextFrequency(
+  allFrequencies: number[],
+  correctCounts: Map<number, number>,
+  excludeFreq?: number
+): number {
+  // Get frequencies that still need work (< REQUIRED_CORRECT)
+  const needsWork = allFrequencies.filter(
+    (f) => (correctCounts.get(f) ?? 0) < REQUIRED_CORRECT && f !== excludeFreq
+  );
+
+  if (needsWork.length === 0) {
+    // All done, but we shouldn't get here
+    return allFrequencies[0];
+  }
+
+  // Sort by correct count (fewest first), then randomize among ties
+  needsWork.sort((a, b) => {
+    const countA = correctCounts.get(a) ?? 0;
+    const countB = correctCounts.get(b) ?? 0;
+    if (countA !== countB) return countA - countB;
+    return Math.random() - 0.5;
+  });
+
+  return needsWork[0];
 }
 
 function getChoices(correctFreq: number): number[] {
@@ -128,7 +149,7 @@ function handleAnswer(answer: number): void {
 }
 
 function handleGrade(grade: Grade): void {
-  // Record the review
+  // Record the review in FSRS
   state.memoryState = recordReview(
     state.memoryState,
     state.currentFrequency,
@@ -136,10 +157,18 @@ function handleGrade(grade: Grade): void {
   );
   saveState(state.memoryState);
 
-  // Move to next card
-  state.currentIndex++;
+  // Track correct answers for session completion
+  if (state.wasCorrect) {
+    const current = state.correctCounts.get(state.currentFrequency) ?? 0;
+    state.correctCounts.set(state.currentFrequency, current + 1);
+  }
 
-  if (state.currentIndex >= state.currentQueue.length) {
+  // Check if all cards have enough correct answers
+  const allComplete = state.allFrequencies.every(
+    (f) => (state.correctCounts.get(f) ?? 0) >= REQUIRED_CORRECT
+  );
+
+  if (allComplete) {
     // Session complete
     state.memoryState = incrementSessionCount(state.memoryState);
     saveState(state.memoryState);
@@ -150,7 +179,12 @@ function handleGrade(grade: Grade): void {
 }
 
 function advanceToNext(): void {
-  const nextFreq = state.currentQueue[state.currentIndex];
+  // Pick next frequency, avoiding the one we just did if possible
+  const nextFreq = pickNextFrequency(
+    state.allFrequencies,
+    state.correctCounts,
+    state.currentFrequency
+  );
   state.currentFrequency = nextFreq;
   state.currentChoices = getChoices(nextFreq);
   state.hasAnswered = false;
@@ -177,7 +211,15 @@ function render(): void {
   const stats = getStats(state.memoryState);
   const choices = state.currentChoices;
 
-  const progress = `${state.currentIndex + 1}/${state.currentQueue.length}`;
+  // Count completed cards (those with enough correct answers)
+  const completedCount = state.allFrequencies.filter(
+    (f) => (state.correctCounts.get(f) ?? 0) >= REQUIRED_CORRECT
+  ).length;
+  const totalCards = state.allFrequencies.length;
+  const currentCorrect = state.correctCounts.get(state.currentFrequency) ?? 0;
+
+  const progress = `${completedCount}/${totalCards} complete`;
+  const cardStatus = `(${currentCorrect}/${REQUIRED_CORRECT} correct)`;
   const cardType = state.isNewCard ? "NEW" : "Review";
 
   const choiceButtons = choices
@@ -204,7 +246,8 @@ function render(): void {
   app.innerHTML = `
     <a href="#/" class="back-link">&larr; Back to exercises</a>
     <h1>Frequency Memorization</h1>
-    <p>Listen and identify the frequency. Card ${progress} (${cardType})</p>
+    <p>Listen and identify the frequency. ${progress}</p>
+    <p>This card: ${cardType} ${cardStatus}</p>
     <p>Use <strong>number keys 1-4</strong> to select, <strong>R</strong> to replay.</p>
 
     <div class="exercise-container">
@@ -243,7 +286,7 @@ function render(): void {
   `;
 
   renderFeedback();
-  setupEventListeners(choices);
+  setupEventListeners();
 }
 
 function renderGradeButtons(): string {
@@ -322,7 +365,8 @@ function renderSessionComplete(): void {
   }
 }
 
-function setupEventListeners(choices: number[]): void {
+function setupEventListeners(): void {
+  const choices = state.currentChoices;
   const playBtn = document.getElementById("play-btn");
   playBtn?.addEventListener("click", () => {
     playCurrentFrequency();
