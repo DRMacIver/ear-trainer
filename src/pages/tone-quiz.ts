@@ -185,7 +185,15 @@ function renderChoiceButtons(): void {
       }
     }
 
-    button.addEventListener("click", () => handleChoice(index));
+    button.addEventListener("click", () => {
+      if (question.hasAnswered && !question.wasCorrect) {
+        // After wrong answer, clicking plays the note
+        const noteToPlay = index === 0 ? question.noteA : question.noteB;
+        playNote(noteToPlay, { duration: NOTE_DURATION });
+      } else {
+        handleChoice(index);
+      }
+    });
     container.appendChild(button);
   });
 }
