@@ -23,8 +23,6 @@ import {
   getNearbyFamilies,
   getOctave,
   getNoteFamily,
-  getIntroducedFamilies,
-  getIntroducedNotesForType,
   NoteIdMemoryState,
   SessionCards,
   NoteIdCard,
@@ -139,29 +137,20 @@ function pickNextQuestion(
   return needsWork[0];
 }
 
-function getChoices(
-  card: NoteIdCard,
-  memoryState: NoteIdMemoryState
-): (string | number)[] {
+function getChoices(card: NoteIdCard): (string | number)[] {
   if (card.questionType === "octaveId") {
     // Always offer 3, 4, 5 as choices
     return OCTAVES;
   }
 
   if (card.questionType === "noteSequence") {
-    // Get nearby note families, filtered to introduced ones
-    const introducedFamilies = getIntroducedFamilies(memoryState);
-    return getNearbyFamilies(card.noteFamily!, 4, introducedFamilies);
+    // Get nearby note families (always show 4 choices)
+    return getNearbyFamilies(card.noteFamily!, 4);
   }
 
   if (card.questionType === "fullNote") {
-    // Get nearby notes in same octave, filtered to introduced ones
-    const octave = getOctave(card.note!);
-    const introducedNotes = getIntroducedNotesForType(memoryState, "fullNote");
-    const introducedInOctave = introducedNotes.filter(
-      (n) => getOctave(n) === octave
-    );
-    return getNearbyNotes(card.note!, 4, introducedInOctave);
+    // Get nearby notes in same octave (always show 4 choices)
+    return getNearbyNotes(card.note!, 4);
   }
 
   return [];
@@ -198,7 +187,7 @@ function initExercise(): void {
     allQuestions,
     correctCounts,
     currentQuestion: firstQuestion,
-    currentChoices: getChoices(firstQuestion.card, memoryState),
+    currentChoices: getChoices(firstQuestion.card),
     eliminatedChoices: new Set(),
     guessHistory: [],
     hasAnswered: false,
@@ -404,7 +393,7 @@ function advanceToNext(): void {
   );
 
   state.currentQuestion = nextQuestion;
-  state.currentChoices = getChoices(nextQuestion.card, state.memoryState);
+  state.currentChoices = getChoices(nextQuestion.card);
   state.eliminatedChoices = new Set();
   state.guessHistory = [];
   state.hasAnswered = false;
