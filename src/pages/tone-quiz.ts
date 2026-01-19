@@ -61,7 +61,7 @@ let shouldRetry = false; // Whether next advance should retry same question
 let shouldRepeatSwapped = false; // Whether to repeat correct answer with swapped order
 let isPlaying = false; // Whether audio is currently playing
 
-const AUTO_ADVANCE_DELAY = 1500; // ms
+const AUTO_ADVANCE_DELAY = 750; // ms
 const RETRY_CHANCE = 0.7; // 70% chance to retry after wrong answer
 const REPEAT_CORRECT_CHANCE = 0.3; // 30% chance to repeat after correct answer
 
