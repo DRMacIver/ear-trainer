@@ -273,6 +273,20 @@ function formatSemitones(semitones: number): string {
   return `${sign}${semitones.toFixed(1)} st`;
 }
 
+function renderScaleTicks(): string {
+  const ticks: string[] = [];
+
+  // Render ticks for each semitone from -19 to +19
+  for (let st = MIN_SEMITONES; st <= MAX_SEMITONES; st++) {
+    const pos = semitonesToPosition(st) * 100;
+    const isOctave = st % 12 === 0;
+    const tickClass = isOctave ? "scale-tick octave" : "scale-tick";
+    ticks.push(`<div class="${tickClass}" style="left: ${pos}%"></div>`);
+  }
+
+  return ticks.join("");
+}
+
 function render(): void {
   const app = document.getElementById("app")!;
 
@@ -301,17 +315,15 @@ function render(): void {
 
       <div class="freq-scale-container">
         <div class="freq-scale" id="interval-scale">
+          ${renderScaleTicks()}
           <div class="freq-bar" id="interval-bar" style="left: ${barLeft}%; width: ${barWidthPct}%"></div>
-          <div class="scale-zero-line" style="left: 50%"></div>
           ${renderHistoryMarkers()}
           ${state.hasAnswered ? `<div class="freq-marker current" style="left: ${semitonesToPosition(state.currentSemitones) * 100}%"></div>` : ""}
         </div>
         <div class="freq-labels interval-labels">
-          <span>-19</span>
           <span>-12</span>
           <span>0</span>
           <span>+12</span>
-          <span>+19</span>
         </div>
       </div>
 
