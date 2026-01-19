@@ -40,8 +40,10 @@ let persistentState: ToneQuizState;
 let question: QuestionState;
 let keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
 let autoAdvanceTimeout: ReturnType<typeof setTimeout> | null = null;
+let shouldRetry = false; // Whether next advance should retry same question
 
-const AUTO_ADVANCE_DELAY = 2000; // ms
+const AUTO_ADVANCE_DELAY = 1500; // ms
+const RETRY_CHANCE = 0.7; // 70% chance to retry after wrong answer
 
 /** Get allowed octaves for a note family to prevent edge identification */
 function getAllowedOctaves(family: FullTone): number[] {
@@ -222,7 +224,7 @@ function setupEventListeners(): void {
     } else if (e.key === " " || e.key === "Enter") {
       e.preventDefault();
       if (question.hasAnswered) {
-        nextQuestion();
+        advanceToNext();
       } else {
         playBothNotes();
       }
@@ -242,9 +244,18 @@ function setupEventListeners(): void {
   window.addEventListener("hashchange", cleanupOnNavigate);
 }
 
+function advanceToNext(): void {
+  if (shouldRetry) {
+    shouldRetry = false;
+    retryQuestion();
+  } else {
+    nextQuestion();
+  }
+}
+
 function handleChoice(chosenIndex: number): void {
   if (question.hasAnswered) {
-    nextQuestion();
+    advanceToNext();
     return;
   }
 
@@ -253,6 +264,9 @@ function handleChoice(chosenIndex: number): void {
 
   question.hasAnswered = true;
   question.wasCorrect = isCorrect;
+
+  // Decide if we should retry on wrong answer
+  shouldRetry = !isCorrect && Math.random() < RETRY_CHANCE;
 
   // Record to persistent state and update streak
   persistentState = recordQuestion(persistentState, {
@@ -280,7 +294,7 @@ function renderFeedback(): void {
     feedback.className = "feedback success";
     feedback.textContent = "Correct! Press Space to continue.";
     // Auto-advance after delay
-    autoAdvanceTimeout = setTimeout(nextQuestion, AUTO_ADVANCE_DELAY);
+    autoAdvanceTimeout = setTimeout(advanceToNext, AUTO_ADVANCE_DELAY);
   } else {
     feedback.className = "feedback error";
     const targetPosition = question.familyA === question.targetNote ? "first" : "second";
@@ -312,6 +326,40 @@ function clearAutoAdvance(): void {
     clearTimeout(autoAdvanceTimeout);
     autoAdvanceTimeout = null;
   }
+}
+
+/** Retry the same question with randomized order */
+function retryQuestion(): void {
+  clearAutoAdvance();
+
+  // Keep same notes but randomize order
+  const targetWithOctave = question.familyA === question.targetNote
+    ? question.noteA
+    : question.noteB;
+  const otherWithOctave = question.familyA === question.targetNote
+    ? question.noteB
+    : question.noteA;
+
+  const [first, second] = randomizeOrder(
+    { note: targetWithOctave, family: question.targetNote },
+    { note: otherWithOctave, family: question.otherNote }
+  );
+
+  question = {
+    noteA: first.note,
+    noteB: second.note,
+    familyA: first.family,
+    familyB: second.family,
+    targetNote: question.targetNote,
+    otherNote: question.otherNote,
+    hasAnswered: false,
+    wasCorrect: null,
+    isFirstInStreak: false, // Retry never counts for familiarity
+    startTime: Date.now(),
+  };
+
+  render();
+  playBothNotes();
 }
 
 function nextQuestion(): void {
