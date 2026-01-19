@@ -50,7 +50,7 @@ interface ExerciseState {
   hasAnswered: boolean;
   wasCorrect: boolean | null;
   userAnswer: string | number | null;
-  lastFeedback: "too-high" | "too-low" | null;
+  lastFeedback: "too-high" | "too-low" | "incorrect" | null;
   sessionCorrect: number;
   sessionTotal: number;
   inputEnabled: boolean;
@@ -60,6 +60,7 @@ interface ExerciseState {
   replayTimesMs: number[];
   playingSequence: boolean;
   playingOctaveTeaching: boolean;
+  playingNoteTeaching: boolean;
   highlightedChoice: string | number | null;
   sequenceComplete: boolean;
 }
@@ -221,6 +222,7 @@ function initExercise(): void {
     replayTimesMs: [],
     playingSequence: false,
     playingOctaveTeaching: false,
+    playingNoteTeaching: false,
     highlightedChoice: null,
     sequenceComplete: false,
   };
@@ -261,79 +263,25 @@ function handleAnswer(answer: string | number): void {
     state.guessHistory.push(answer);
     state.wasCorrect = false;
 
-    // Determine too high/low based on question type
-    let isTooHigh: boolean;
-    if (state.currentQuestion.card.questionType === "octaveId") {
-      isTooHigh = (answer as number) > (correctAnswer as number);
-    } else if (state.currentQuestion.card.questionType === "noteSequence") {
-      const noteOrder = [
-        "C",
-        "C#",
-        "D",
-        "D#",
-        "E",
-        "F",
-        "F#",
-        "G",
-        "G#",
-        "A",
-        "A#",
-        "B",
-      ];
-      isTooHigh =
-        noteOrder.indexOf(answer as string) >
-        noteOrder.indexOf(correctAnswer as string);
-    } else {
-      // fullNote
-      const noteOrder = [
-        "C",
-        "C#",
-        "D",
-        "D#",
-        "E",
-        "F",
-        "F#",
-        "G",
-        "G#",
-        "A",
-        "A#",
-        "B",
-      ];
-      const getIndex = (n: string) => noteOrder.indexOf(n.replace(/\d+$/, ""));
-      isTooHigh = getIndex(answer as string) > getIndex(correctAnswer as string);
-    }
-    state.lastFeedback = isTooHigh ? "too-high" : "too-low";
+    const questionType = state.currentQuestion.card.questionType;
 
-    // Eliminate choices
-    for (const choice of state.currentChoices) {
-      if (state.currentQuestion.card.questionType === "octaveId") {
-        if (isTooHigh && (choice as number) >= (answer as number)) {
-          state.eliminatedChoices.add(choice);
-        } else if (!isTooHigh && (choice as number) <= (answer as number)) {
-          state.eliminatedChoices.add(choice);
-        }
-      } else if (state.currentQuestion.card.questionType === "noteSequence") {
-        const noteOrder = [
-          "C",
-          "C#",
-          "D",
-          "D#",
-          "E",
-          "F",
-          "F#",
-          "G",
-          "G#",
-          "A",
-          "A#",
-          "B",
-        ];
-        const choiceIdx = noteOrder.indexOf(choice as string);
-        const answerIdx = noteOrder.indexOf(answer as string);
-        if (isTooHigh && choiceIdx >= answerIdx) {
-          state.eliminatedChoices.add(choice);
-        } else if (!isTooHigh && choiceIdx <= answerIdx) {
-          state.eliminatedChoices.add(choice);
-        }
+    if (questionType === "noteSequence") {
+      // For noteSequence, just mark as incorrect and eliminate the wrong choice
+      state.lastFeedback = "incorrect";
+      state.eliminatedChoices.add(answer);
+
+      render();
+
+      // Play teaching sequence: wrong family then correct family
+      playNoteSequenceTeachingSequence(
+        answer as string,
+        correctAnswer as string
+      );
+    } else {
+      // For octaveId and fullNote, use directional feedback
+      let isTooHigh: boolean;
+      if (questionType === "octaveId") {
+        isTooHigh = (answer as number) > (correctAnswer as number);
       } else {
         // fullNote
         const noteOrder = [
@@ -351,24 +299,53 @@ function handleAnswer(answer: string | number): void {
           "B",
         ];
         const getIndex = (n: string) => noteOrder.indexOf(n.replace(/\d+$/, ""));
-        const choiceIdx = getIndex(choice as string);
-        const answerIdx = getIndex(answer as string);
-        if (isTooHigh && choiceIdx >= answerIdx) {
-          state.eliminatedChoices.add(choice);
-        } else if (!isTooHigh && choiceIdx <= answerIdx) {
-          state.eliminatedChoices.add(choice);
+        isTooHigh =
+          getIndex(answer as string) > getIndex(correctAnswer as string);
+      }
+      state.lastFeedback = isTooHigh ? "too-high" : "too-low";
+
+      // Eliminate choices directionally
+      for (const choice of state.currentChoices) {
+        if (questionType === "octaveId") {
+          if (isTooHigh && (choice as number) >= (answer as number)) {
+            state.eliminatedChoices.add(choice);
+          } else if (!isTooHigh && (choice as number) <= (answer as number)) {
+            state.eliminatedChoices.add(choice);
+          }
+        } else {
+          // fullNote
+          const noteOrder = [
+            "C",
+            "C#",
+            "D",
+            "D#",
+            "E",
+            "F",
+            "F#",
+            "G",
+            "G#",
+            "A",
+            "A#",
+            "B",
+          ];
+          const getIndex = (n: string) =>
+            noteOrder.indexOf(n.replace(/\d+$/, ""));
+          const choiceIdx = getIndex(choice as string);
+          const answerIdx = getIndex(answer as string);
+          if (isTooHigh && choiceIdx >= answerIdx) {
+            state.eliminatedChoices.add(choice);
+          } else if (!isTooHigh && choiceIdx <= answerIdx) {
+            state.eliminatedChoices.add(choice);
+          }
         }
       }
-    }
 
-    render();
+      render();
 
-    // For octaveId, play teaching sequence: wrong octave then correct octave
-    if (state.currentQuestion.card.questionType === "octaveId") {
-      playOctaveTeachingSequence(
-        answer as number,
-        correctAnswer as number
-      );
+      // For octaveId, play teaching sequence: wrong octave then correct octave
+      if (questionType === "octaveId") {
+        playOctaveTeachingSequence(answer as number, correctAnswer as number);
+      }
     }
   }
 }
@@ -434,6 +411,7 @@ function advanceToNext(): void {
   state.replayTimesMs = [];
   state.playingSequence = false;
   state.playingOctaveTeaching = false;
+  state.playingNoteTeaching = false;
   state.highlightedChoice = null;
   state.sequenceComplete = false;
 
@@ -519,6 +497,51 @@ async function playOctaveNote(octave: number): Promise<void> {
   render();
   await playFrequency(freq, { duration: NOTE_DURATION });
   state.highlightedChoice = null;
+  render();
+}
+
+/**
+ * Play teaching sequence for wrong noteSequence answer:
+ * 1. Play the wrong family in 3→4→5
+ * 2. Then play the correct family in 3→4→5
+ */
+async function playNoteSequenceTeachingSequence(
+  wrongFamily: string,
+  correctFamily: string
+): Promise<void> {
+  state.playingNoteTeaching = true;
+  state.inputEnabled = false;
+  render();
+
+  // Play the wrong family sequence (what they chose)
+  state.highlightedChoice = wrongFamily;
+  render();
+  for (const octave of OCTAVES) {
+    const note = `${wrongFamily}${octave}`;
+    const freq = getFrequencyForNote(note);
+    await playFrequency(freq, { duration: NOTE_DURATION });
+    if (octave < 5) {
+      await new Promise((r) => setTimeout(r, SEQUENCE_GAP_MS));
+    }
+  }
+
+  await new Promise((r) => setTimeout(r, SEQUENCE_GAP_MS * 2));
+
+  // Play the correct family sequence
+  state.highlightedChoice = correctFamily;
+  render();
+  for (const octave of OCTAVES) {
+    const note = `${correctFamily}${octave}`;
+    const freq = getFrequencyForNote(note);
+    await playFrequency(freq, { duration: NOTE_DURATION });
+    if (octave < 5) {
+      await new Promise((r) => setTimeout(r, SEQUENCE_GAP_MS));
+    }
+  }
+
+  state.highlightedChoice = null;
+  state.playingNoteTeaching = false;
+  state.inputEnabled = true;
   render();
 }
 
@@ -651,12 +674,14 @@ function render(): void {
         isDisabled =
           state.playingSequence ||
           state.playingOctaveTeaching ||
+          state.playingNoteTeaching ||
           state.sequenceComplete;
       } else {
         isDisabled =
           isEliminated ||
           state.playingSequence ||
           state.playingOctaveTeaching ||
+          state.playingNoteTeaching ||
           state.sequenceComplete;
       }
 
@@ -680,6 +705,8 @@ function render(): void {
     feedbackHtml = `<div class="feedback">Playing sequence...</div>`;
   } else if (state.playingOctaveTeaching) {
     feedbackHtml = `<div class="feedback">Listen to the difference...</div>`;
+  } else if (state.playingNoteTeaching) {
+    feedbackHtml = `<div class="feedback">Listen to the difference...</div>`;
   } else if (state.sequenceComplete) {
     feedbackHtml = `<div class="feedback success">The answer was ${formatChoice(correctAnswer, card.questionType)}</div>`;
   } else if (state.hasAnswered) {
@@ -689,8 +716,12 @@ function render(): void {
       feedbackHtml = `<div class="feedback success">Correct!</div>`;
     }
   } else if (state.lastFeedback) {
-    const feedbackText =
-      state.lastFeedback === "too-high" ? "Too high!" : "Too low!";
+    let feedbackText: string;
+    if (state.lastFeedback === "incorrect") {
+      feedbackText = "Incorrect";
+    } else {
+      feedbackText = state.lastFeedback === "too-high" ? "Too high!" : "Too low!";
+    }
     feedbackHtml = `<div class="feedback error">${feedbackText}</div>`;
   }
 
