@@ -661,11 +661,12 @@ function render(): void {
       const isEliminated = state.eliminatedChoices.has(choice);
       const isCorrect = state.hasAnswered && choice === correctAnswer;
 
-      // For octaveId and noteSequence, keep buttons clickable after answering (to allow exploration)
+      // For octaveId and noteSequence, keep buttons clickable for exploration
+      // (even eliminated choices can be clicked to hear them again)
       // But disable during sequence playback or teaching playback
       let isDisabled: boolean;
-      if (allowsExploration && state.hasAnswered) {
-        // After answering, only disable during playback
+      if (allowsExploration) {
+        // For exploration types, only disable during playback (not for eliminated choices)
         isDisabled =
           state.playingSequence ||
           state.playingOctaveTeaching ||
@@ -688,9 +689,10 @@ function render(): void {
         className += " eliminated";
       }
 
-      // Add data attribute to indicate if this is for exploration (post-answer)
+      // Add data attributes for exploration behavior
       const isExploration = allowsExploration && state.hasAnswered;
-      return `<button class="${className}" data-choice="${choice}" data-idx="${idx}" data-exploration="${isExploration}" ${isDisabled ? "disabled" : ""}>${formatChoice(choice, card.questionType)}</button>`;
+      const canExploreEliminated = allowsExploration && isEliminated;
+      return `<button class="${className}" data-choice="${choice}" data-idx="${idx}" data-exploration="${isExploration}" data-explore-eliminated="${canExploreEliminated}" ${isDisabled ? "disabled" : ""}>${formatChoice(choice, card.questionType)}</button>`;
     })
     .join("");
 
@@ -866,18 +868,26 @@ function setupEventListeners(): void {
       const choiceStr = (btn as HTMLElement).dataset.choice || "";
       const isExploration =
         (btn as HTMLElement).dataset.exploration === "true";
+      const canExploreEliminated =
+        (btn as HTMLElement).dataset.exploreEliminated === "true";
       const questionType = state.currentQuestion.card.questionType;
 
       if (questionType === "octaveId") {
         const octave = parseInt(choiceStr, 10);
-        if (!state.hasAnswered) {
+        if (canExploreEliminated && !state.playingOctaveTeaching) {
+          // Clicking eliminated choice plays that octave's note
+          playOctaveNote(octave);
+        } else if (!state.hasAnswered) {
           handleAnswer(octave);
         } else if (isExploration && !state.playingOctaveTeaching) {
           // After answering, clicking plays that octave's note
           playOctaveNote(octave);
         }
       } else if (questionType === "noteSequence") {
-        if (!state.hasAnswered) {
+        if (canExploreEliminated && !state.playingNoteTeaching) {
+          // Clicking eliminated choice plays that family's sequence
+          playNoteFamilySequence(choiceStr);
+        } else if (!state.hasAnswered) {
           handleAnswer(choiceStr);
         } else if (isExploration && !state.playingNoteTeaching) {
           // After answering, clicking plays that note family's sequence
