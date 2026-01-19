@@ -251,8 +251,8 @@ function handleGrade(grade: Grade): void {
   );
   saveState(state.memoryState);
 
-  // Track correct answers for session completion
-  if (state.wasCorrect) {
+  // Track correct answers for session completion (only first-try correct counts)
+  if (state.wasCorrect && state.guessHistory.length === 0) {
     const current = state.correctCounts.get(state.currentFrequency) ?? 0;
     state.correctCounts.set(state.currentFrequency, current + 1);
   }
