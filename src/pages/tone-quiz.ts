@@ -149,21 +149,31 @@ async function playIntroductionSequence(): Promise<void> {
 
   isPlaying = true;
 
+  const octaveButtons = document.querySelectorAll("#octave-buttons .intro-note-btn");
+  const vocabButtons = document.querySelectorAll("#vocab-buttons .intro-note-btn");
+
   // Play the introduced note in 3 octaves
-  for (const octave of [3, 4, 5]) {
-    await playNote(`${introState.introducedNote}${octave}`, {
+  const octaves = [3, 4, 5];
+  for (let i = 0; i < octaves.length; i++) {
+    const btn = octaveButtons[i];
+    btn?.classList.add("playing");
+    await playNote(`${introState.introducedNote}${octaves[i]}`, {
       duration: INTRO_NOTE_DURATION,
     });
     await new Promise((r) => setTimeout(r, INTRO_NOTE_GAP));
+    btn?.classList.remove("playing");
   }
 
   // Brief pause before vocab
   await new Promise((r) => setTimeout(r, 400));
 
   // Play all vocab notes in chromatic order (octave 4)
-  for (const note of introState.vocabNotes) {
-    await playNote(`${note}4`, { duration: INTRO_NOTE_DURATION });
+  for (let i = 0; i < introState.vocabNotes.length; i++) {
+    const btn = vocabButtons[i];
+    btn?.classList.add("playing");
+    await playNote(`${introState.vocabNotes[i]}4`, { duration: INTRO_NOTE_DURATION });
     await new Promise((r) => setTimeout(r, INTRO_NOTE_GAP));
+    btn?.classList.remove("playing");
   }
 
   isPlaying = false;
@@ -276,27 +286,7 @@ function setupIntroEventListeners(): void {
 /** Replay the full introduction sequence */
 async function replayIntroSequence(): Promise<void> {
   if (!introState || isPlaying) return;
-
-  isPlaying = true;
-
-  // Play the introduced note in 3 octaves
-  for (const octave of [3, 4, 5]) {
-    await playNote(`${introState.introducedNote}${octave}`, {
-      duration: INTRO_NOTE_DURATION,
-    });
-    await new Promise((r) => setTimeout(r, INTRO_NOTE_GAP));
-  }
-
-  // Brief pause before vocab
-  await new Promise((r) => setTimeout(r, 400));
-
-  // Play all vocab notes in chromatic order (octave 4)
-  for (const note of introState.vocabNotes) {
-    await playNote(`${note}4`, { duration: INTRO_NOTE_DURATION });
-    await new Promise((r) => setTimeout(r, INTRO_NOTE_GAP));
-  }
-
-  isPlaying = false;
+  await playIntroductionSequence();
 }
 
 /** Finish introduction and return to normal quiz */
