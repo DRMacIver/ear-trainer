@@ -23,6 +23,10 @@ const AUTO_ADVANCE_DELAY = 1000;
 // Half a semitone threshold for "about the same"
 const SAME_THRESHOLD_LOG = 1 / 24; // Half semitone in log2 units (octaves)
 
+// If range is narrower than 2x the "same" threshold, wrong answers don't count as losses
+// (you've already demonstrated good discrimination by narrowing to this resolution)
+const TIGHT_RANGE_MULTIPLIER = 2;
+
 interface ExerciseState {
   // The frequency being played (stays same until sequence ends)
   playedFrequency: number;
@@ -36,6 +40,7 @@ interface ExerciseState {
   correctAnswer: "higher" | "lower" | "same";
   hasAnswered: boolean;
   wasCorrect: boolean | null;
+  wasTightRange: boolean; // Range was tight enough that wrong doesn't count as loss
   userAnswer: "higher" | "lower" | "same" | null;
   // Stats
   totalCorrect: number;
@@ -90,6 +95,11 @@ function generateRound(): void {
     state.correctAnswer = "lower";
   }
 
+  // Check if range is tight enough that wrong answers shouldn't penalize
+  const currentRange = state.upperBoundLog - state.lowerBoundLog;
+  const tightRangeThreshold = SAME_THRESHOLD_LOG * TIGHT_RANGE_MULTIPLIER;
+  state.wasTightRange = currentRange <= tightRangeThreshold;
+
   state.hasAnswered = false;
   state.wasCorrect = null;
   state.userAnswer = null;
@@ -106,6 +116,7 @@ function initExercise(): void {
     correctAnswer: "higher",
     hasAnswered: false,
     wasCorrect: null,
+    wasTightRange: false,
     userAnswer: null,
     totalCorrect: 0,
     totalAttempts: 0,
@@ -131,7 +142,11 @@ function handleAnswer(answer: "higher" | "lower" | "same"): void {
   // For higher/lower rounds, only the exact answer is correct
   state.wasCorrect = answer === state.correctAnswer;
 
-  if (state.wasCorrect) {
+  // If range was tight enough, wrong answers don't count as losses
+  // (you've already demonstrated good discrimination by narrowing this far)
+  const countsAsSuccess = state.wasCorrect || state.wasTightRange;
+
+  if (countsAsSuccess) {
     state.totalCorrect++;
     state.streak++;
     state.sequenceLength++;
@@ -149,9 +164,11 @@ function handleAnswer(answer: "higher" | "lower" | "same"): void {
 
 async function advanceToNext(): Promise<void> {
   // Decide whether to continue sequence or start fresh
+  // Sequence ends on: wrong answer, correct "same", or tight range (even if wrong)
   const sequenceEnds =
     !state.wasCorrect ||
-    (state.wasCorrect && state.correctAnswer === "same");
+    state.correctAnswer === "same" ||
+    state.wasTightRange;
 
   if (sequenceEnds) {
     // Start a completely new sequence
@@ -278,6 +295,10 @@ function renderFeedback(): void {
     } else {
       feedback.textContent = `Correct! The tone was ${playedStr} (${semitones} semitones ${direction}).`;
     }
+  } else if (state.wasTightRange) {
+    // Wrong but range was tight - counts as success
+    feedback.className = "feedback success fade-out";
+    feedback.textContent = `Close enough! The tone was ${playedStr} (${semitones} semitones ${direction}). New tone!`;
   } else {
     const correctDesc =
       state.correctAnswer === "same" ? "about the same" : state.correctAnswer;
