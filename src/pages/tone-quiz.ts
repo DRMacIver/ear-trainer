@@ -41,6 +41,7 @@ let question: QuestionState;
 let keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
 let autoAdvanceTimeout: ReturnType<typeof setTimeout> | null = null;
 let shouldRetry = false; // Whether next advance should retry same question
+let isPlaying = false; // Whether audio is currently playing
 
 const AUTO_ADVANCE_DELAY = 1500; // ms
 const RETRY_CHANCE = 0.7; // 70% chance to retry after wrong answer
@@ -99,9 +100,11 @@ function initQuestion(): boolean {
 }
 
 async function playBothNotes(): Promise<void> {
+  isPlaying = true;
   await playNote(question.noteA, { duration: NOTE_DURATION });
   await new Promise((resolve) => setTimeout(resolve, GAP_BETWEEN_NOTES));
   await playNote(question.noteB, { duration: NOTE_DURATION });
+  isPlaying = false;
 }
 
 function flashScreen(): void {
@@ -231,6 +234,7 @@ function setupEventListeners(): void {
       playBothNotes();
     } else if (e.key === " " || e.key === "Enter") {
       e.preventDefault();
+      if (isPlaying) return; // Don't advance while audio is playing
       if (question.hasAnswered) {
         advanceToNext();
       } else {
