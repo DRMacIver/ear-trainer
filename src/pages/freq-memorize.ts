@@ -216,10 +216,8 @@ function render(): void {
     (f) => (state.correctCounts.get(f) ?? 0) >= REQUIRED_CORRECT
   ).length;
   const totalCards = state.allFrequencies.length;
-  const currentCorrect = state.correctCounts.get(state.currentFrequency) ?? 0;
 
   const progress = `${completedCount}/${totalCards} complete`;
-  const cardStatus = `(${currentCorrect}/${REQUIRED_CORRECT} correct)`;
   const cardType = state.isNewCard ? "NEW" : "Review";
 
   const choiceButtons = choices
@@ -246,8 +244,7 @@ function render(): void {
   app.innerHTML = `
     <a href="#/" class="back-link">&larr; Back to exercises</a>
     <h1>Frequency Memorization</h1>
-    <p>Listen and identify the frequency. ${progress}</p>
-    <p>This card: ${cardType} ${cardStatus}</p>
+    <p>Listen and identify the frequency. ${progress} (${cardType})</p>
     <p>Use <strong>number keys 1-4</strong> to select, <strong>R</strong> to replay.</p>
 
     <div class="exercise-container">
