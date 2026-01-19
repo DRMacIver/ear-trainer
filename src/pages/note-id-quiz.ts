@@ -251,7 +251,12 @@ function handleAnswer(answer: string | number): void {
       state.sessionCorrect++;
     }
 
-    if (state.guessHistory.length > 0) {
+    if (
+      state.guessHistory.length > 0 &&
+      state.currentQuestion.card.questionType !== "noteSequence"
+    ) {
+      // For octaveId and fullNote, play learning sequence after mistakes
+      // For noteSequence, just let them explore by clicking
       render();
       setTimeout(() => {
         playLearningSequence();
@@ -734,6 +739,17 @@ function render(): void {
     `;
   } else if (state.hasAnswered && state.guessHistory.length === 0) {
     afterAnswer = renderGradeButtons();
+  } else if (
+    state.hasAnswered &&
+    state.guessHistory.length > 0 &&
+    isNoteSequence
+  ) {
+    // For noteSequence with previous mistakes, show continue button (no learning sequence)
+    afterAnswer = `
+      <div class="sequence-controls">
+        <button class="choice-btn" id="continue-btn">Continue</button>
+      </div>
+    `;
   }
 
   // Progress summary
