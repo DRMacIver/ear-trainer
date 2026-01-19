@@ -162,25 +162,77 @@ function findSplittingFrequency(state: FreqMemoryState): number | null {
 }
 
 /**
+ * Find the best new frequency to introduce in a gap between two introduced frequencies.
+ * Prefers frequencies near the midpoint, avoiding those within 50Hz of familiar notes.
+ */
+function findBestNewFreqInGap(
+  newFreqs: number[],
+  introducedFreqs: number[],
+  lowBound: number,
+  highBound: number
+): number | null {
+  // Find new frequencies in this gap
+  const candidates = newFreqs.filter((f) => f > lowBound && f < highBound);
+  if (candidates.length === 0) return null;
+
+  const midpoint = (lowBound + highBound) / 2;
+
+  // Sort by distance from midpoint
+  candidates.sort((a, b) => Math.abs(a - midpoint) - Math.abs(b - midpoint));
+
+  // Try to find one that's not within 50Hz of any introduced frequency
+  for (const candidate of candidates) {
+    const tooClose = introducedFreqs.some(
+      (f) => Math.abs(f - candidate) <= 50
+    );
+    if (!tooClose) return candidate;
+  }
+
+  // If all are too close, just return the one nearest the midpoint
+  return candidates[0];
+}
+
+/**
  * Find two new frequencies to introduce, one on each side of the splitting freq.
+ * Tries to pick frequencies near the midpoint of gaps, avoiding those within 50Hz
+ * of already-introduced frequencies.
  */
 function findNewFrequenciesToIntroduce(
   state: FreqMemoryState,
   splittingFreq: number
 ): [number, number] | null {
   const newFreqs = getNewFrequencies(state);
+  const introduced = getIntroducedFrequencies(state);
 
-  // Find closest new frequency below splitting
-  const below = newFreqs
+  // Find the bounds for the gaps on each side of splitting
+  // Below: from the next introduced freq below splitting, to splitting
+  const introducedBelow = introduced
     .filter((f) => f < splittingFreq)
-    .sort((a, b) => b - a)[0]; // Highest one below
+    .sort((a, b) => b - a); // Descending
+  const lowerBound = introducedBelow[0] ?? ALL_FREQUENCIES[0];
 
-  // Find closest new frequency above splitting
-  const above = newFreqs
+  // Above: from splitting to the next introduced freq above
+  const introducedAbove = introduced
     .filter((f) => f > splittingFreq)
-    .sort((a, b) => a - b)[0]; // Lowest one above
+    .sort((a, b) => a - b); // Ascending
+  const upperBound =
+    introducedAbove[0] ?? ALL_FREQUENCIES[ALL_FREQUENCIES.length - 1];
 
-  if (below === undefined || above === undefined) return null;
+  // Find best new frequency in each gap
+  const below = findBestNewFreqInGap(
+    newFreqs,
+    introduced,
+    lowerBound,
+    splittingFreq
+  );
+  const above = findBestNewFreqInGap(
+    newFreqs,
+    introduced,
+    splittingFreq,
+    upperBound
+  );
+
+  if (below === null || above === null) return null;
 
   return [below, above];
 }
