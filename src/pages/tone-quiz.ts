@@ -17,7 +17,6 @@ import {
   updateStreak,
   ToneQuizState,
   FullTone,
-  STREAK_LENGTH,
 } from "../lib/tone-quiz-state.js";
 
 const NOTE_DURATION = 0.6;
@@ -33,6 +32,7 @@ interface QuestionState {
   hasAnswered: boolean;
   wasCorrect: boolean | null;
   isFirstInStreak: boolean;
+  countsForStreak: boolean; // False for retries/repeats
   startTime: number;
 }
 
@@ -41,10 +41,12 @@ let question: QuestionState;
 let keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
 let autoAdvanceTimeout: ReturnType<typeof setTimeout> | null = null;
 let shouldRetry = false; // Whether next advance should retry same question
+let shouldRepeatSwapped = false; // Whether to repeat correct answer with swapped order
 let isPlaying = false; // Whether audio is currently playing
 
 const AUTO_ADVANCE_DELAY = 1500; // ms
 const RETRY_CHANCE = 0.7; // 70% chance to retry after wrong answer
+const REPEAT_CORRECT_CHANCE = 0.3; // 30% chance to repeat after correct answer
 
 /** Get allowed octaves for a note family to prevent edge identification */
 function getAllowedOctaves(family: FullTone): number[] {
@@ -93,6 +95,7 @@ function initQuestion(): boolean {
     hasAnswered: false,
     wasCorrect: null,
     isFirstInStreak: isFirstOnTarget,
+    countsForStreak: true, // New questions count
     startTime: Date.now(),
   };
 
@@ -120,12 +123,11 @@ function render(): void {
   const recentCorrect = recentHistory.filter((r) => r.correct).length;
   const totalPlayed = persistentState.history.length;
   const vocabDisplay = persistentState.learningVocabulary.join(", ");
-  const streakInfo = `(${persistentState.correctStreak}/${STREAK_LENGTH} correct)`;
 
   app.innerHTML = `
     <a href="#/" class="back-link">&larr; Back to exercises</a>
     <h1>Tone Quiz</h1>
-    <p>Two notes play. Which one was the <strong>${question.targetNote}</strong>? ${streakInfo}</p>
+    <p>Two notes play. Identify the named note.</p>
     <p class="keyboard-hints"><strong>Keys:</strong> <kbd>1</kbd>/<kbd>←</kbd> First, <kbd>2</kbd>/<kbd>→</kbd> Second, <kbd>R</kbd> Replay, <kbd>Space</kbd> Continue</p>
 
     <div class="exercise-container">
@@ -260,6 +262,9 @@ function advanceToNext(): void {
   if (shouldRetry) {
     shouldRetry = false;
     retryQuestion();
+  } else if (shouldRepeatSwapped) {
+    shouldRepeatSwapped = false;
+    retryQuestion(); // retryQuestion already randomizes order
   } else {
     nextQuestion();
   }
@@ -277,10 +282,16 @@ function handleChoice(chosenIndex: number): void {
   question.hasAnswered = true;
   question.wasCorrect = isCorrect;
 
-  // Decide if we should retry on wrong answer
-  shouldRetry = !isCorrect && Math.random() < RETRY_CHANCE;
+  // Decide next action
+  if (isCorrect) {
+    // 30% chance to repeat with swapped order (doesn't count for streak)
+    shouldRepeatSwapped = Math.random() < REPEAT_CORRECT_CHANCE;
+  } else {
+    // 70% chance to retry on wrong answer
+    shouldRetry = Math.random() < RETRY_CHANCE;
+  }
 
-  // Record to persistent state and update streak
+  // Record to persistent state
   persistentState = recordQuestion(persistentState, {
     timestamp: Date.now(),
     noteA: question.noteA,
@@ -291,7 +302,11 @@ function handleChoice(chosenIndex: number): void {
     wasFirstInStreak: question.isFirstInStreak,
     timeMs: Date.now() - question.startTime,
   });
-  persistentState = updateStreak(persistentState, isCorrect);
+
+  // Only update streak if this question counts and won't be repeated
+  if (question.countsForStreak && !shouldRepeatSwapped) {
+    persistentState = updateStreak(persistentState, isCorrect);
+  }
   saveState(persistentState);
 
   renderChoiceButtons();
@@ -367,6 +382,7 @@ function retryQuestion(): void {
     hasAnswered: false,
     wasCorrect: null,
     isFirstInStreak: false, // Retry never counts for familiarity
+    countsForStreak: false, // Retries/repeats don't count for streak
     startTime: Date.now(),
   };
 
