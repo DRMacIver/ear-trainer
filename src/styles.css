@@ -1033,6 +1033,20 @@ a:hover {
   transform: none;
 }
 
+.freq-choice.highlighted {
+  background: #ff9800;
+  border-color: #ff9800;
+  color: #fff;
+  box-shadow: 0 0 15px rgba(255, 152, 0, 0.6);
+}
+
+.sequence-controls {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  margin: 1rem 0;
+}
+
 /* Danger Zone */
 .danger-zone {
   margin-top: 3rem;

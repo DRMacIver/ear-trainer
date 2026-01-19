@@ -48,6 +48,10 @@ interface ExerciseState {
   elapsedBeforePause: number; // Accumulated time before current pause
   pausedAt: number | null; // When we paused (null if not paused)
   replayTimesMs: number[]; // When replay was pressed (relative to start)
+  // Learning sequence (after wrong guesses)
+  playingSequence: boolean; // Currently playing the learning sequence
+  highlightedFreq: number | null; // Which button to highlight during sequence
+  sequenceComplete: boolean; // Sequence finished, show replay option
 }
 
 const REQUIRED_CORRECT = 2; // Each card needs this many correct answers
@@ -132,6 +136,9 @@ function initExercise(): void {
     elapsedBeforePause: 0,
     pausedAt: document.hidden ? performance.now() : null,
     replayTimesMs: [],
+    playingSequence: false,
+    highlightedFreq: null,
+    sequenceComplete: false,
   };
 
   setupVisibilityHandler();
@@ -207,12 +214,13 @@ function handleAnswer(answer: number): void {
       state.sessionCorrect++;
     }
 
-    // If they needed retries, auto-grade as Again and move on
+    // If they needed retries, play learning sequence then auto-grade
     if (state.guessHistory.length > 0) {
-      render(); // Show correct feedback briefly
+      render(); // Show correct feedback
+      // Start learning sequence after a brief pause
       setTimeout(() => {
-        handleGrade(Grade.AGAIN);
-      }, 800);
+        playLearningSequence();
+      }, 500);
     } else {
       render(); // Show grade buttons for first-try correct
     }
@@ -294,6 +302,10 @@ function advanceToNext(): void {
   state.elapsedBeforePause = 0;
   state.pausedAt = document.hidden ? performance.now() : null;
   state.replayTimesMs = [];
+  // Reset sequence state
+  state.playingSequence = false;
+  state.highlightedFreq = null;
+  state.sequenceComplete = false;
 
   render();
   playCurrentFrequency();
@@ -313,6 +325,37 @@ async function handleReplay(): Promise<void> {
   await playCurrentFrequency();
 }
 
+/**
+ * Play the learning sequence: all choices low to high, then correct again.
+ * Highlights each button as it plays.
+ */
+async function playLearningSequence(): Promise<void> {
+  state.playingSequence = true;
+  state.sequenceComplete = false;
+  render();
+
+  const GAP_MS = 300; // Gap between tones
+
+  // Play each choice in order (already sorted low to high)
+  for (const freq of state.currentChoices) {
+    state.highlightedFreq = freq;
+    render();
+    await playFrequency(freq, { duration: NOTE_DURATION });
+    await new Promise((r) => setTimeout(r, GAP_MS));
+  }
+
+  // Play the correct answer again
+  state.highlightedFreq = state.currentFrequency;
+  render();
+  await playFrequency(state.currentFrequency, { duration: NOTE_DURATION });
+
+  // Sequence complete
+  state.playingSequence = false;
+  state.highlightedFreq = null;
+  state.sequenceComplete = true;
+  render();
+}
+
 function formatFrequency(freq: number): string {
   return `${freq}Hz`;
 }
@@ -327,7 +370,10 @@ function render(): void {
       let className = "choice-btn freq-choice";
       const isEliminated = state.eliminatedChoices.has(freq);
 
-      if (state.hasAnswered && freq === state.currentFrequency) {
+      if (state.highlightedFreq === freq) {
+        // Currently playing this tone in sequence
+        className += " highlighted";
+      } else if (state.hasAnswered && freq === state.currentFrequency) {
         className += " correct";
       } else if (isEliminated) {
         className += " eliminated";
@@ -339,7 +385,11 @@ function render(): void {
 
   // Show feedback
   let feedbackHtml = "";
-  if (state.hasAnswered) {
+  if (state.playingSequence) {
+    feedbackHtml = `<div class="feedback">Playing sequence...</div>`;
+  } else if (state.sequenceComplete) {
+    feedbackHtml = `<div class="feedback success">The answer was ${formatFrequency(state.currentFrequency)}</div>`;
+  } else if (state.hasAnswered) {
     feedbackHtml = `<div class="feedback success">Correct! ${formatFrequency(state.currentFrequency)}</div>`;
   } else if (state.lastFeedback) {
     const feedbackText =
@@ -347,9 +397,20 @@ function render(): void {
     feedbackHtml = `<div class="feedback error">${feedbackText}</div>`;
   }
 
-  // Only show grade buttons for first-try correct (no retries)
-  const showGradeButtons = state.hasAnswered && state.guessHistory.length === 0;
-  const afterAnswer = showGradeButtons ? renderGradeButtons() : "";
+  // Show different controls depending on state
+  let afterAnswer = "";
+  if (state.sequenceComplete) {
+    // After learning sequence, show replay and continue buttons
+    afterAnswer = `
+      <div class="sequence-controls">
+        <button class="choice-btn" id="replay-sequence-btn">Replay Sequence</button>
+        <button class="choice-btn" id="continue-btn">Continue</button>
+      </div>
+    `;
+  } else if (state.hasAnswered && state.guessHistory.length === 0) {
+    // First-try correct, show grade buttons
+    afterAnswer = renderGradeButtons();
+  }
 
   app.innerHTML = `
     <a href="#/" class="back-link">&larr; Back to exercises</a>
@@ -485,6 +546,18 @@ function setupEventListeners(): void {
     });
   });
 
+  // Replay sequence button
+  const replaySeqBtn = document.getElementById("replay-sequence-btn");
+  replaySeqBtn?.addEventListener("click", () => {
+    playLearningSequence();
+  });
+
+  // Continue button (after learning sequence, auto-grade as Again)
+  const continueBtn = document.getElementById("continue-btn");
+  continueBtn?.addEventListener("click", () => {
+    handleGrade(Grade.AGAIN);
+  });
+
   if (keyboardHandler) {
     document.removeEventListener("keydown", keyboardHandler);
   }
@@ -492,9 +565,23 @@ function setupEventListeners(): void {
   keyboardHandler = (e: KeyboardEvent) => {
     if (e.repeat) return;
 
+    // Don't allow input during sequence playback
+    if (state.playingSequence) return;
+
     if (e.key === "r" || e.key === "R") {
       e.preventDefault();
-      handleReplay();
+      if (state.sequenceComplete) {
+        playLearningSequence();
+      } else {
+        handleReplay();
+      }
+      return;
+    }
+
+    // Enter or 'c' to continue after sequence
+    if (state.sequenceComplete && (e.key === "Enter" || e.key === "c" || e.key === "C")) {
+      e.preventDefault();
+      handleGrade(Grade.AGAIN);
       return;
     }
 
@@ -506,8 +593,8 @@ function setupEventListeners(): void {
         e.preventDefault();
         handleAnswer(choices[num - 1]);
       }
-    } else {
-      // After correct answer, 1-4 for grades
+    } else if (!state.sequenceComplete && state.guessHistory.length === 0) {
+      // After first-try correct answer (not in sequence state), 1-4 for grades
       if (num >= 1 && num <= 4) {
         e.preventDefault();
         handleGrade(num as Grade);
