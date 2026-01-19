@@ -519,8 +519,8 @@ async function playNoteSequenceTeachingSequence(
 
   await new Promise((r) => setTimeout(r, SEQUENCE_GAP_MS * 2));
 
-  // Play the correct family sequence
-  state.highlightedChoice = correctFamily;
+  // Play the correct family sequence (without highlighting - don't reveal the answer)
+  state.highlightedChoice = null;
   render();
   for (const octave of OCTAVES) {
     const note = `${correctFamily}${octave}`;
