@@ -18,6 +18,7 @@ import {
   recordReview,
   incrementSessionCount,
   getStats,
+  clearAllProgress,
   FreqMemoryState,
   SessionCards,
   ALL_FREQUENCIES,
@@ -223,6 +224,11 @@ function render(): void {
         </div>
       </div>
     </div>
+
+    <div class="danger-zone">
+      <button class="danger-btn" id="clear-history-btn">CLEAR ALL PROGRESS</button>
+      <p class="danger-warning">This will permanently delete all your learning history and start over.</p>
+    </div>
   `;
 
   renderFeedback();
@@ -373,6 +379,21 @@ function setupEventListeners(choices: number[]): void {
     window.removeEventListener("hashchange", cleanupOnNavigate);
   };
   window.addEventListener("hashchange", cleanupOnNavigate);
+
+  // Clear history button
+  const clearHistoryBtn = document.getElementById("clear-history-btn");
+  clearHistoryBtn?.addEventListener("click", () => {
+    if (
+      confirm(
+        "Are you sure you want to clear ALL progress? This cannot be undone."
+      )
+    ) {
+      clearAllProgress();
+      initExercise();
+      render();
+      playCurrentFrequency();
+    }
+  });
 }
 
 export async function renderFreqMemorize(): Promise<void> {

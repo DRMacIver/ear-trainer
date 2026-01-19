@@ -1021,3 +1021,36 @@ a:hover {
   font-size: 1.1rem;
   text-align: center;
 }
+
+/* Danger Zone */
+.danger-zone {
+  margin-top: 4rem;
+  padding: 2rem;
+  border: 2px solid #d32f2f;
+  border-radius: 8px;
+  background: rgba(211, 47, 47, 0.1);
+  text-align: center;
+}
+
+.danger-btn {
+  padding: 1rem 2rem;
+  font-size: 1.2rem;
+  font-weight: bold;
+  background: #d32f2f;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.danger-btn:hover {
+  background: #b71c1c;
+}
+
+.danger-warning {
+  color: #ef5350;
+  font-size: 0.9rem;
+  margin-top: 1rem;
+  margin-bottom: 0;
+}

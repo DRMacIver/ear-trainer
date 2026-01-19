@@ -428,3 +428,14 @@ export function getStats(state: FreqMemoryState): {
     totalReviews: state.history.length,
   };
 }
+
+/**
+ * Clear all progress and start fresh.
+ */
+export function clearAllProgress(): void {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // localStorage may be unavailable
+  }
+}
