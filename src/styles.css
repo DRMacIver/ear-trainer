@@ -824,6 +824,17 @@ a:hover {
   background: rgba(255, 255, 255, 0.4);
 }
 
+.reference-marker {
+  position: absolute;
+  top: 0;
+  width: 4px;
+  height: 100%;
+  background: #ff9800;
+  transform: translateX(-50%);
+  pointer-events: none;
+  box-shadow: 0 0 8px rgba(255, 152, 0, 0.6);
+}
+
 .freq-labels {
   display: flex;
   justify-content: space-between;

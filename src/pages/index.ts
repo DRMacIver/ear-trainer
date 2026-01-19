@@ -119,11 +119,11 @@ export function renderIndex(): void {
         </a>
       </li>
       <li>
-        <a href="#/exercises/ratio-range">
-          <div class="title">Interval Range</div>
+        <a href="#/exercises/relative-frequency">
+          <div class="title">Relative Frequency</div>
           <div class="description">
-            Two tones play - estimate the interval in semitones from first to second.
-            Positive = second is higher, negative = second is lower.
+            A reference tone plays with its frequency shown. Then a second tone plays.
+            Pinpoint the second frequency using the reference as a guide.
           </div>
         </a>
       </li>
