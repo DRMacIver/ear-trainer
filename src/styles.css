@@ -1131,11 +1131,23 @@ a:hover {
   cursor: default;
 }
 
-.keyboard-hint {
+.keyboard-hint,
+.keyboard-hints {
   text-align: center;
   color: #666;
   font-size: 0.85rem;
-  margin-top: 1rem;
+  margin-top: 0.5rem;
+}
+
+kbd {
+  display: inline-block;
+  padding: 0.15rem 0.4rem;
+  font-family: monospace;
+  font-size: 0.85em;
+  background: #333;
+  border: 1px solid #555;
+  border-radius: 3px;
+  color: #ccc;
 }
 
 /* Danger Zone */

@@ -78,6 +78,7 @@ function render(): void {
     <a href="#/" class="back-link">&larr; Back to exercises</a>
     <h1>Tone Quiz</h1>
     <p>Two notes play. Which one was the <strong>${question.targetNote}</strong>?</p>
+    <p class="keyboard-hints"><strong>Keys:</strong> <kbd>1</kbd>/<kbd>←</kbd> First, <kbd>2</kbd>/<kbd>→</kbd> Second, <kbd>R</kbd> Replay, <kbd>Space</kbd> Continue</p>
 
     <div class="exercise-container">
       <div class="controls">
@@ -149,7 +150,10 @@ function setupEventListeners(): void {
     } else if (e.key === "ArrowRight" || e.key === "2") {
       e.preventDefault();
       handleChoice(1);
-    } else if (e.key === " ") {
+    } else if (e.key === "r" || e.key === "R") {
+      e.preventDefault();
+      playBothNotes();
+    } else if (e.key === " " || e.key === "Enter") {
       e.preventDefault();
       if (question.hasAnswered) {
         nextQuestion();
