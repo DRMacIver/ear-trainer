@@ -403,17 +403,17 @@ function render(): void {
   const choices = state.currentChoices;
   const correctAnswer = getCorrectAnswer();
 
-  // Build question text
-  let questionText: string;
+  // Build question with prominent key value
+  let questionHtml: string;
   if (state.currentCard.direction === "freqToNote") {
-    questionText = `This is ${state.currentCard.frequency}Hz. Which note is it?`;
+    questionHtml = `<span class="question-value">${state.currentCard.frequency}Hz</span><br>Which note is it?`;
   } else {
-    questionText = `This is ${state.currentCard.note}. Which frequency is it?`;
+    questionHtml = `<span class="question-value">${state.currentCard.note}</span><br>Which frequency is it?`;
   }
 
   const choiceButtons = choices
     .map((choice, idx) => {
-      let className = "choice-btn freq-choice";
+      let className = "choice-btn nf-choice";
       const isEliminated = state.eliminatedChoices.has(choice);
       const isCorrect = state.hasAnswered && choice === correctAnswer;
       const isDisabled =
@@ -431,14 +431,14 @@ function render(): void {
     })
     .join("");
 
-  // Feedback
+  // Feedback (shown above choices)
   let feedbackHtml = "";
   if (state.playingSequence) {
     feedbackHtml = `<div class="feedback">Playing sequence...</div>`;
   } else if (state.sequenceComplete) {
     feedbackHtml = `<div class="feedback success">The answer was ${formatChoice(correctAnswer)}</div>`;
   } else if (state.hasAnswered) {
-    feedbackHtml = `<div class="feedback success">Correct! ${formatChoice(correctAnswer)}</div>`;
+    feedbackHtml = `<div class="feedback success">Correct!</div>`;
   } else if (state.lastFeedback) {
     const feedbackText =
       state.lastFeedback === "too-high" ? "Too high!" : "Too low!";
@@ -461,21 +461,20 @@ function render(): void {
   app.innerHTML = `
     <a href="#/" class="back-link">&larr; Back to exercises</a>
     <h1>Note-Frequency Quiz</h1>
-    <p class="question-text">${questionText}</p>
-    <p>Use <strong>number keys 1-4</strong> to select, <strong>R</strong> to replay.</p>
 
     <div class="exercise-container">
-      <div class="controls">
-        <button class="play-again-btn" id="play-btn">Play Again</button>
+      <div class="nf-question-block">
+        <div class="nf-question">${questionHtml}</div>
+        <button class="play-again-btn" id="play-btn">Play Again (R)</button>
       </div>
 
-      <div class="freq-choices" id="choice-buttons">
+      ${feedbackHtml}
+
+      <div class="nf-choices" id="choice-buttons">
         ${choiceButtons}
       </div>
 
       ${afterAnswer}
-
-      ${feedbackHtml}
 
       <div class="stats-row">
         <div class="stats correct-stat">
@@ -491,13 +490,13 @@ function render(): void {
           <span>${stats.sessionsCompleted}</span>
         </div>
       </div>
-    </div>
 
-    <p class="note-text">Frequencies are rounded to the nearest Hz.</p>
+      <p class="keyboard-hint">Keys 1-4 to select</p>
+    </div>
 
     <div class="danger-zone">
       <button class="danger-btn" id="clear-history-btn">Clear Progress</button>
-      <p class="danger-warning">Reset all learning history</p>
+      <p class="danger-warning">Reset all learning history (frequencies rounded to nearest Hz)</p>
     </div>
   `;
 
@@ -571,7 +570,7 @@ function setupEventListeners(): void {
     handleReplay();
   });
 
-  const choiceButtons = document.querySelectorAll(".freq-choice");
+  const choiceButtons = document.querySelectorAll(".nf-choice");
   choiceButtons.forEach((btn) => {
     btn.addEventListener("click", () => {
       if (!state.hasAnswered) {

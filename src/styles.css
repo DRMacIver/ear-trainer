@@ -1058,6 +1058,73 @@ a:hover {
   transition: all 0.15s ease-out;
 }
 
+/* Note-Frequency Quiz */
+.nf-question-block {
+  text-align: center;
+  margin-bottom: 1rem;
+}
+
+.nf-question {
+  font-size: 1.2rem;
+  color: #aaa;
+  margin-bottom: 1rem;
+  line-height: 1.4;
+}
+
+.nf-question .question-value {
+  display: block;
+  font-size: 3rem;
+  font-weight: bold;
+  color: #64b5f6;
+  margin-bottom: 0.25rem;
+}
+
+.nf-choices {
+  display: flex;
+  justify-content: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin: 1rem 0;
+}
+
+.nf-choice {
+  padding: 1rem 1.5rem;
+  font-size: 1.1rem;
+  min-width: 90px;
+  text-align: center;
+  transition: all 0.15s ease-out;
+}
+
+.nf-choice.eliminated {
+  opacity: 0.4;
+  cursor: not-allowed;
+  text-decoration: line-through;
+}
+
+.nf-choice.eliminated:hover {
+  background: #1a1a2e;
+  transform: none;
+}
+
+.nf-choice.highlighted {
+  background: #ff9800;
+  border-color: #ff9800;
+  color: #fff;
+  box-shadow: 0 0 15px rgba(255, 152, 0, 0.6);
+}
+
+.nf-choice:disabled:not(.highlighted) {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.keyboard-hint {
+  text-align: center;
+  color: #666;
+  font-size: 0.85rem;
+  margin-top: 1rem;
+}
+
 /* Danger Zone */
 .danger-zone {
   margin-top: 3rem;
