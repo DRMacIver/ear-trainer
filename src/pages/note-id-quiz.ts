@@ -150,26 +150,17 @@ function getChoices(
   }
 
   if (card.questionType === "noteSequence") {
-    // Get nearby note families, but filter out sharps that haven't been introduced
+    // Only allow introduced families as choices
     const introducedFamilies = getIntroducedFamilies(memoryState);
-    const introducedSharps = introducedFamilies.filter((f) => f.includes("#"));
-    // Allow all non-sharps + only introduced sharps
-    const allowedFamilies = [
-      "C",
-      "D",
-      "E",
-      "F",
-      "G",
-      "A",
-      "B",
-      ...introducedSharps,
-    ];
-    return getNearbyFamilies(card.noteFamily!, 4, allowedFamilies);
+    return getNearbyFamilies(card.noteFamily!, 4, introducedFamilies);
   }
 
   if (card.questionType === "fullNote") {
-    // Get nearby notes in same octave (always show 4 choices)
-    return getNearbyNotes(card.note!, 4);
+    // Only allow notes whose families have been introduced
+    const introducedFamilies = getIntroducedFamilies(memoryState);
+    const octave = getOctave(card.note!);
+    const allowedNotes = introducedFamilies.map((f) => `${f}${octave}`);
+    return getNearbyNotes(card.note!, 4, allowedNotes);
   }
 
   return [];
