@@ -34,6 +34,7 @@ interface ExerciseState {
   currentFrequency: number;
   currentChoices: number[]; // Fixed choices for current question (sorted low to high)
   eliminatedChoices: Set<number>; // Choices that have been greyed out
+  guessHistory: number[]; // Wrong guesses made on current card
   hasAnswered: boolean; // True only when answered correctly
   wasCorrect: boolean | null;
   userAnswer: number | null;
@@ -74,6 +75,7 @@ function initExercise(): void {
     currentFrequency: firstFreq,
     currentChoices: getChoices(firstFreq),
     eliminatedChoices: new Set(),
+    guessHistory: [],
     hasAnswered: false,
     wasCorrect: null,
     userAnswer: null,
@@ -149,32 +151,48 @@ function handleAnswer(answer: number): void {
     state.wasCorrect = true;
     state.lastFeedback = null;
     state.sessionTotal++;
-    state.sessionCorrect++;
+
+    // Only count as "correct" for session stats if first try
+    if (state.guessHistory.length === 0) {
+      state.sessionCorrect++;
+    }
+
+    // If they needed retries, auto-grade as Again and move on
+    if (state.guessHistory.length > 0) {
+      render(); // Show correct feedback briefly
+      setTimeout(() => {
+        handleGrade(Grade.AGAIN);
+      }, 800);
+    } else {
+      render(); // Show grade buttons for first-try correct
+    }
   } else {
-    // Wrong - give feedback and eliminate choices
+    // Wrong - record guess, give feedback, eliminate choices
+    state.guessHistory.push(answer);
     state.wasCorrect = false;
-    const isToohigh = answer > state.currentFrequency;
-    state.lastFeedback = isToohigh ? "too-high" : "too-low";
+    const isTooHigh = answer > state.currentFrequency;
+    state.lastFeedback = isTooHigh ? "too-high" : "too-low";
 
     // Eliminate this choice and all choices in the wrong direction
     for (const choice of state.currentChoices) {
-      if (isToohigh && choice >= answer) {
+      if (isTooHigh && choice >= answer) {
         state.eliminatedChoices.add(choice);
-      } else if (!isToohigh && choice <= answer) {
+      } else if (!isTooHigh && choice <= answer) {
         state.eliminatedChoices.add(choice);
       }
     }
-  }
 
-  render();
+    render();
+  }
 }
 
 function handleGrade(grade: Grade): void {
-  // Record the review in FSRS
+  // Record the review in FSRS (include guess history for analysis)
   state.memoryState = recordReview(
     state.memoryState,
     state.currentFrequency,
-    grade
+    grade,
+    state.guessHistory
   );
   saveState(state.memoryState);
 
@@ -209,6 +227,7 @@ function advanceToNext(): void {
   state.currentFrequency = nextFreq;
   state.currentChoices = getChoices(nextFreq);
   state.eliminatedChoices = new Set();
+  state.guessHistory = [];
   state.hasAnswered = false;
   state.wasCorrect = null;
   state.userAnswer = null;
@@ -259,8 +278,9 @@ function render(): void {
     feedbackHtml = `<div class="feedback error">${feedbackText}</div>`;
   }
 
-  // Only show grade buttons after correct answer
-  const afterAnswer = state.hasAnswered ? renderGradeButtons() : "";
+  // Only show grade buttons for first-try correct (no retries)
+  const showGradeButtons = state.hasAnswered && state.guessHistory.length === 0;
+  const afterAnswer = showGradeButtons ? renderGradeButtons() : "";
 
   app.innerHTML = `
     <a href="#/" class="back-link">&larr; Back to exercises</a>

@@ -20,6 +20,7 @@ export interface ReviewRecord {
   timestamp: number; // Unix timestamp
   grade: Grade;
   wasNew: boolean;
+  guessHistory?: number[]; // Wrong guesses before correct answer (empty = first try)
 }
 
 export interface FrequencyCard {
@@ -483,7 +484,8 @@ export function selectSessionCards(state: FreqMemoryState): SessionCards {
 export function recordReview(
   state: FreqMemoryState,
   frequency: number,
-  grade: Grade
+  grade: Grade,
+  guessHistory: number[] = []
 ): FreqMemoryState {
   const now = Date.now();
   const cardIndex = state.cards.findIndex((c) => c.frequency === frequency);
@@ -518,6 +520,7 @@ export function recordReview(
     timestamp: now,
     grade,
     wasNew,
+    guessHistory: guessHistory.length > 0 ? guessHistory : undefined,
   };
 
   return {
