@@ -226,8 +226,8 @@ function render(): void {
     </div>
 
     <div class="danger-zone">
-      <button class="danger-btn" id="clear-history-btn">CLEAR ALL PROGRESS</button>
-      <p class="danger-warning">This will permanently delete all your learning history and start over.</p>
+      <button class="danger-btn" id="clear-history-btn">Clear Progress</button>
+      <p class="danger-warning">Reset all learning history</p>
     </div>
   `;
 
