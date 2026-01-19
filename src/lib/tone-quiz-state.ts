@@ -176,44 +176,75 @@ export function recordQuestion(
 }
 
 /**
+ * Check if note `a` is higher than note `b` in chromatic order.
+ */
+function isHigherNote(a: FullTone, b: FullTone): boolean {
+  return FULL_TONES.indexOf(a) > FULL_TONES.indexOf(b);
+}
+
+/**
+ * Select from candidates using distance-weighted random selection.
+ * Candidates should already be sorted by distance (farthest first).
+ */
+function selectWeighted(candidates: FullTone[]): FullTone {
+  if (candidates.length === 0) {
+    throw new Error("No candidates to select from");
+  }
+  if (candidates.length === 1) {
+    return candidates[0];
+  }
+  // Weight by position (farther = more likely)
+  const weights = candidates.map((_, idx) => idx + 1);
+  const totalWeight = weights.reduce((a, b) => a + b, 0);
+  let random = Math.random() * totalWeight;
+  for (let j = 0; j < candidates.length; j++) {
+    random -= weights[j];
+    if (random <= 0) {
+      return candidates[j];
+    }
+  }
+  return candidates[candidates.length - 1];
+}
+
+/**
  * Select an "other" note for a question about the target.
  * Starts with distant notes, gets closer as user improves.
+ * Ensures 50% higher / 50% lower to prevent pitch-based guessing.
  */
 export function selectOtherNote(
   state: ToneQuizState,
   target: FullTone
 ): FullTone {
-  // Get all other notes sorted by distance from target (farthest first)
-  const others = FULL_TONES.filter((n) => n !== target).sort(
+  // First decide: should the other note be higher or lower?
+  const wantHigher = Math.random() < 0.5;
+
+  // Split notes into higher and lower groups
+  const allOthers = FULL_TONES.filter((n) => n !== target);
+  const higherNotes = allOthers.filter((n) => isHigherNote(n, target));
+  const lowerNotes = allOthers.filter((n) => !isHigherNote(n, target));
+
+  // Pick the group we want, fall back to the other if empty
+  let pool = wantHigher ? higherNotes : lowerNotes;
+  if (pool.length === 0) {
+    pool = wantHigher ? lowerNotes : higherNotes;
+  }
+
+  // Sort by distance from target (farthest first)
+  pool = [...pool].sort(
     (a, b) => getNoteDistance(target, b) - getNoteDistance(target, a)
   );
 
   // Find the closest note we're NOT yet familiar with
-  for (let i = others.length - 1; i >= 0; i--) {
-    if (!isFamiliarWith(state, target, others[i])) {
+  for (let i = pool.length - 1; i >= 0; i--) {
+    if (!isFamiliarWith(state, target, pool[i])) {
       // Return a note at this distance or farther (with some randomness)
-      const candidates = others.slice(0, i + 1);
-      // Bias towards farther notes if we're not familiar with closer ones
-      // Weight by position (farther = more likely)
-      const weights = candidates.map((_, idx) => idx + 1);
-      const totalWeight = weights.reduce((a, b) => a + b, 0);
-      let random = Math.random() * totalWeight;
-      for (let j = 0; j < candidates.length; j++) {
-        random -= weights[j];
-        if (random <= 0) {
-          return candidates[j];
-        }
-      }
-      return candidates[candidates.length - 1];
+      const candidates = pool.slice(0, i + 1);
+      return selectWeighted(candidates);
     }
   }
 
-  // Familiar with all - pick randomly, slight bias to adjacent for challenge
-  const [lower, upper] = getAdjacentNotes(target);
-  if (Math.random() < 0.4) {
-    return Math.random() < 0.5 ? lower : upper;
-  }
-  return others[Math.floor(Math.random() * others.length)];
+  // Familiar with all in this direction - pick randomly from pool
+  return pool[Math.floor(Math.random() * pool.length)];
 }
 
 /**
