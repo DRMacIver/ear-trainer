@@ -136,6 +136,15 @@ export function renderIndex(): void {
           </div>
         </a>
       </li>
+      <li>
+        <a href="#/exercises/freq-memorize">
+          <div class="title">Frequency Memorization</div>
+          <div class="description">
+            Memorize frequencies from 100Hz to 1100Hz using spaced repetition (FSRS).
+            Sessions introduce new frequencies gradually with structured review.
+          </div>
+        </a>
+      </li>
     </ul>
   `;
 }

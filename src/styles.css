@@ -911,6 +911,98 @@ a:hover {
   font-size: 0.9rem;
 }
 
+/* Grade Buttons for FSRS */
+.grade-buttons {
+  margin: 1.5rem 0;
+  text-align: center;
+}
+
+.grade-prompt {
+  margin-bottom: 0.75rem;
+  color: #aaa;
+}
+
+.grade-btn-row {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.grade-btn {
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
+  border: 2px solid #333;
+  border-radius: 6px;
+  background: #1a1a2e;
+  color: #eee;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.grade-btn:hover {
+  background: #16213e;
+}
+
+.grade-btn.again {
+  border-color: #f44336;
+  color: #f44336;
+}
+
+.grade-btn.again:hover {
+  background: rgba(244, 67, 54, 0.2);
+}
+
+.grade-btn.hard {
+  border-color: #ff9800;
+  color: #ff9800;
+}
+
+.grade-btn.hard:hover {
+  background: rgba(255, 152, 0, 0.2);
+}
+
+.grade-btn.good {
+  border-color: #4caf50;
+  color: #4caf50;
+}
+
+.grade-btn.good:hover {
+  background: rgba(76, 175, 80, 0.2);
+}
+
+.grade-btn.easy {
+  border-color: #2196f3;
+  color: #2196f3;
+}
+
+.grade-btn.easy:hover {
+  background: rgba(33, 150, 243, 0.2);
+}
+
+/* Session Summary */
+.session-summary {
+  text-align: center;
+  margin: 2rem 0;
+}
+
+.session-summary h2 {
+  margin-bottom: 1rem;
+}
+
+.session-summary p {
+  margin: 0.5rem 0;
+  color: #aaa;
+}
+
+.session-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 2rem;
+}
+
 /* Frequency Multiple Choice */
 .freq-choices,
 .ratio-choices {
