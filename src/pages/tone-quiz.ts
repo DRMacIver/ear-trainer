@@ -1,0 +1,244 @@
+/**
+ * Tone Quiz Exercise
+ *
+ * Two tones play. User identifies which one was a particular note.
+ * Continuous play - tracks history in localStorage.
+ */
+
+import { playNote } from "../audio.js";
+import {
+  loadState,
+  saveState,
+  pickRandomPair,
+  pickTargetNote,
+  randomizeOrder,
+  recordQuestion,
+  ToneQuizState,
+  FullTone,
+} from "../lib/tone-quiz-state.js";
+
+const NOTE_DURATION = 0.6;
+const GAP_BETWEEN_NOTES = 300; // ms
+
+interface QuestionState {
+  noteA: string; // First note played (with octave)
+  noteB: string; // Second note played (with octave)
+  familyA: FullTone; // Note family of first note
+  familyB: FullTone; // Note family of second note
+  targetNote: FullTone; // Which note family we're asking about
+  hasAnswered: boolean;
+  wasCorrect: boolean | null;
+  startTime: number;
+}
+
+let persistentState: ToneQuizState;
+let question: QuestionState;
+let keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
+
+function initQuestion(): void {
+  const [familyA, familyB] = pickRandomPair();
+  const targetNote = pickTargetNote(familyA, familyB);
+
+  // Always octave 4 for now
+  const noteAWithOctave = `${familyA}4`;
+  const noteBWithOctave = `${familyB}4`;
+
+  // Randomize which plays first
+  const [first, second] = randomizeOrder(
+    { note: noteAWithOctave, family: familyA },
+    { note: noteBWithOctave, family: familyB }
+  );
+
+  question = {
+    noteA: first.note,
+    noteB: second.note,
+    familyA: first.family,
+    familyB: second.family,
+    targetNote,
+    hasAnswered: false,
+    wasCorrect: null,
+    startTime: Date.now(),
+  };
+}
+
+async function playBothNotes(): Promise<void> {
+  await playNote(question.noteA, { duration: NOTE_DURATION });
+  await new Promise((resolve) => setTimeout(resolve, GAP_BETWEEN_NOTES));
+  await playNote(question.noteB, { duration: NOTE_DURATION });
+}
+
+function render(): void {
+  const app = document.getElementById("app")!;
+
+  const recentHistory = persistentState.history.slice(-20);
+  const recentCorrect = recentHistory.filter((r) => r.correct).length;
+  const totalPlayed = persistentState.history.length;
+
+  app.innerHTML = `
+    <a href="#/" class="back-link">&larr; Back to exercises</a>
+    <h1>Tone Quiz</h1>
+    <p>Two notes play. Which one was the <strong>${question.targetNote}</strong>?</p>
+
+    <div class="exercise-container">
+      <div class="controls">
+        <button class="play-again-btn" id="play-btn">Play Again</button>
+      </div>
+
+      <div>
+        <h3>Which was the ${question.targetNote}?</h3>
+        <div class="note-choice-buttons" id="choice-buttons"></div>
+      </div>
+
+      <div id="feedback"></div>
+
+      <div class="stats">
+        <span class="stats-label">Recent:</span>
+        <span id="score">${recentCorrect} / ${recentHistory.length}</span>
+        <span class="stats-label" style="margin-left: 1rem;">Total:</span>
+        <span>${totalPlayed}</span>
+      </div>
+    </div>
+  `;
+
+  renderChoiceButtons();
+  setupEventListeners();
+}
+
+function renderChoiceButtons(): void {
+  const container = document.getElementById("choice-buttons")!;
+  container.innerHTML = "";
+
+  // Show "First" and "Second" as the choices
+  const choices = [
+    { label: "First", family: question.familyA },
+    { label: "Second", family: question.familyB },
+  ];
+
+  choices.forEach((choice, index) => {
+    const button = document.createElement("button");
+    button.className = "note-choice-btn";
+    button.textContent = choice.label;
+    button.dataset.index = String(index);
+
+    if (question.hasAnswered) {
+      const isCorrect = choice.family === question.targetNote;
+      if (isCorrect) {
+        button.classList.add("correct");
+      } else if (!question.wasCorrect) {
+        button.classList.add("incorrect");
+      }
+    }
+
+    button.addEventListener("click", () => handleChoice(index));
+    container.appendChild(button);
+  });
+}
+
+function setupEventListeners(): void {
+  const playBtn = document.getElementById("play-btn")!;
+  playBtn.addEventListener("click", playBothNotes);
+
+  if (keyboardHandler) {
+    document.removeEventListener("keydown", keyboardHandler);
+  }
+
+  keyboardHandler = (e: KeyboardEvent) => {
+    if (e.key === "ArrowLeft" || e.key === "1") {
+      e.preventDefault();
+      handleChoice(0);
+    } else if (e.key === "ArrowRight" || e.key === "2") {
+      e.preventDefault();
+      handleChoice(1);
+    } else if (e.key === " ") {
+      e.preventDefault();
+      if (question.hasAnswered) {
+        nextQuestion();
+      } else {
+        playBothNotes();
+      }
+    }
+  };
+
+  document.addEventListener("keydown", keyboardHandler);
+
+  const cleanupOnNavigate = () => {
+    if (keyboardHandler) {
+      document.removeEventListener("keydown", keyboardHandler);
+      keyboardHandler = null;
+    }
+    window.removeEventListener("hashchange", cleanupOnNavigate);
+  };
+  window.addEventListener("hashchange", cleanupOnNavigate);
+}
+
+function handleChoice(chosenIndex: number): void {
+  if (question.hasAnswered) {
+    nextQuestion();
+    return;
+  }
+
+  const chosenFamily = chosenIndex === 0 ? question.familyA : question.familyB;
+  const isCorrect = chosenFamily === question.targetNote;
+
+  question.hasAnswered = true;
+  question.wasCorrect = isCorrect;
+
+  // Record to persistent state
+  persistentState = recordQuestion(persistentState, {
+    timestamp: Date.now(),
+    noteA: question.noteA,
+    noteB: question.noteB,
+    targetNote: question.targetNote,
+    correct: isCorrect,
+    timeMs: Date.now() - question.startTime,
+  });
+  saveState(persistentState);
+
+  renderChoiceButtons();
+  renderFeedback();
+  updateStats();
+}
+
+function renderFeedback(): void {
+  const feedback = document.getElementById("feedback")!;
+
+  if (question.wasCorrect) {
+    feedback.className = "feedback success";
+    feedback.textContent = "Correct! Press Space to continue.";
+  } else {
+    feedback.className = "feedback error";
+    feedback.innerHTML = `
+      Incorrect. The ${question.targetNote} was ${question.familyA === question.targetNote ? "first" : "second"}.
+      <br><button id="replay-btn" class="play-again-btn" style="margin-top: 0.5rem;">Replay Both Notes</button>
+      <br><small>Press Space to continue.</small>
+    `;
+
+    const replayBtn = document.getElementById("replay-btn");
+    if (replayBtn) {
+      replayBtn.addEventListener("click", playBothNotes);
+    }
+  }
+}
+
+function updateStats(): void {
+  const recentHistory = persistentState.history.slice(-20);
+  const recentCorrect = recentHistory.filter((r) => r.correct).length;
+
+  const scoreEl = document.getElementById("score");
+  if (scoreEl) {
+    scoreEl.textContent = `${recentCorrect} / ${recentHistory.length}`;
+  }
+}
+
+function nextQuestion(): void {
+  initQuestion();
+  render();
+  playBothNotes();
+}
+
+export function renderToneQuiz(): void {
+  persistentState = loadState();
+  initQuestion();
+  render();
+  playBothNotes();
+}

@@ -22,6 +22,19 @@ export function renderIndex(): void {
       </li>
     </ul>
 
+    <h2>Practice</h2>
+    <ul class="exercise-list">
+      <li>
+        <a href="#/exercises/tone-quiz">
+          <div class="title">Tone Quiz</div>
+          <div class="description">
+            Two notes play - identify which one was the target note.
+            Continuous practice with progress tracking.
+          </div>
+        </a>
+      </li>
+    </ul>
+
     <h2>More</h2>
     <ul class="exercise-list">
       <li>
