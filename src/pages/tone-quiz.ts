@@ -9,6 +9,7 @@ import { playNote } from "../audio.js";
 import {
   loadState,
   saveState,
+  clearState,
   pickRandomPair,
   pickTargetNote,
   randomizeOrder,
@@ -102,6 +103,11 @@ function render(): void {
         <span class="stats-label" style="margin-left: 1rem;">Total:</span>
         <span>${totalPlayed}</span>
       </div>
+
+      <div class="danger-zone">
+        <button class="danger-btn" id="clear-history-btn">Clear History</button>
+        <p class="danger-warning">This will reset all your progress</p>
+      </div>
     </div>
   `;
 
@@ -139,9 +145,21 @@ function renderChoiceButtons(): void {
   });
 }
 
+function handleClearHistory(): void {
+  if (confirm("Clear all history? This cannot be undone.")) {
+    clearState();
+    persistentState = loadState();
+    render();
+    playBothNotes();
+  }
+}
+
 function setupEventListeners(): void {
   const playBtn = document.getElementById("play-btn")!;
   playBtn.addEventListener("click", playBothNotes);
+
+  const clearBtn = document.getElementById("clear-history-btn")!;
+  clearBtn.addEventListener("click", handleClearHistory);
 
   if (keyboardHandler) {
     document.removeEventListener("keydown", keyboardHandler);

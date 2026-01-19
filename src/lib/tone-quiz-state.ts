@@ -38,6 +38,10 @@ export function saveState(state: ToneQuizState): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
+export function clearState(): void {
+  localStorage.removeItem(STORAGE_KEY);
+}
+
 export function recordQuestion(
   state: ToneQuizState,
   record: QuestionRecord
