@@ -2,26 +2,24 @@
  * Note-Frequency Mapping State Management
  *
  * Manages spaced repetition for memorizing the bidirectional mapping
- * between musical notes (C4-B4) and their frequencies using FSRS algorithm.
+ * between musical notes (C3-B5) and their frequencies using FSRS algorithm.
  */
 
 import { Card, Grade, createDeck } from "./fsrs.js";
 import { NOTE_FREQUENCIES } from "../audio.js";
 
-// All note-frequency mappings for octave 4
 export interface NoteFreqMapping {
   note: string; // e.g., "A4"
-  frequency: number; // e.g., 440 (rounded to nearest Hz)
+  frequency: number; // rounded to nearest Hz
+  octave: number; // 3, 4, or 5
 }
 
-// Direction of the quiz question
 export type QuizDirection = "freqToNote" | "noteToFreq";
 
-// A single flashcard (one direction of a mapping)
 export interface NoteFreqCard {
   note: string;
   direction: QuizDirection;
-  card: Card | null; // null = not yet introduced
+  card: Card | null;
   lastReviewedAt: number | null;
   reviewCount: number;
 }
@@ -32,7 +30,7 @@ export interface NoteFreqReviewRecord {
   timestamp: number;
   grade: Grade;
   wasNew: boolean;
-  guessHistory?: string[] | number[]; // Wrong guesses (notes or frequencies)
+  guessHistory?: string[] | number[];
   timeMs?: number;
   replayTimesMs?: number[];
 }
@@ -44,54 +42,49 @@ export interface NoteFreqMemoryState {
   sessionCount: number;
 }
 
-// Generate mappings for octave 4
-const NOTE_NAMES_IN_ORDER = [
-  "C4",
-  "C#4",
-  "D4",
-  "D#4",
-  "E4",
-  "F4",
-  "F#4",
-  "G4",
-  "G#4",
-  "A4",
-  "A#4",
-  "B4",
-];
+const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+const OCTAVES = [3, 4, 5];
 
-export const ALL_MAPPINGS: NoteFreqMapping[] = NOTE_NAMES_IN_ORDER.map(
-  (note) => ({
-    note,
-    frequency: Math.round(NOTE_FREQUENCIES[note]),
-  })
-);
+function generateAllMappings(): NoteFreqMapping[] {
+  const mappings: NoteFreqMapping[] = [];
+  for (const octave of OCTAVES) {
+    for (const name of NOTE_NAMES) {
+      const note = `${name}${octave}`;
+      mappings.push({
+        note,
+        frequency: Math.round(NOTE_FREQUENCIES[note]),
+        octave,
+      });
+    }
+  }
+  return mappings;
+}
 
-// Introduction order: start well-separated then fill gaps
-// C4, F4, A4 first (spread across the octave), then fill in
+export const ALL_MAPPINGS = generateAllMappings();
+
+// Introduction order: start with octave 4 non-sharps, then sharps, then expand
 export const INTRODUCTION_ORDER = [
-  "C4",
-  "A4",
-  "F4", // First 3: well separated
-  "D4",
-  "G4",
-  "B4", // Next 3: fill major gaps
-  "E4",
-  "C#4",
-  "F#4", // Next 3: fill smaller gaps
-  "D#4",
-  "G#4",
-  "A#4", // Final 3: remaining notes
+  // Octave 4 non-sharps (well separated)
+  "C4", "A4", "F4", "D4", "G4", "B4", "E4",
+  // Octave 4 sharps
+  "C#4", "F#4", "D#4", "G#4", "A#4",
+  // Octave 3 non-sharps
+  "C3", "A3", "F3", "D3", "G3", "B3", "E3",
+  // Octave 3 sharps
+  "C#3", "F#3", "D#3", "G#3", "A#3",
+  // Octave 5 non-sharps
+  "C5", "A5", "F5", "D5", "G5", "B5", "E5",
+  // Octave 5 sharps
+  "C#5", "F#5", "D#5", "G#5", "A#5",
 ];
 
-const STORAGE_KEY = "ear-trainer:note-freq-memory";
+const STORAGE_KEY = "ear-trainer:note-freq-memory-v2";
 
 const deck = createDeck();
 
 function createInitialState(): NoteFreqMemoryState {
   const cards: NoteFreqCard[] = [];
 
-  // Create two cards per mapping (one for each direction)
   for (const mapping of ALL_MAPPINGS) {
     cards.push({
       note: mapping.note,
@@ -140,6 +133,11 @@ export function saveState(state: NoteFreqMemoryState): void {
   }
 }
 
+export function getOctave(note: string): number {
+  const match = note.match(/(\d)$/);
+  return match ? parseInt(match[1], 10) : 4;
+}
+
 /**
  * Get notes that have been introduced (both directions have card state).
  */
@@ -148,7 +146,6 @@ export function getIntroducedNotes(state: NoteFreqMemoryState): string[] {
 
   for (const card of state.cards) {
     if (card.card !== null) {
-      // Only count as introduced if both directions are introduced
       const otherDirection = state.cards.find(
         (c) => c.note === card.note && c.direction !== card.direction
       );
@@ -169,26 +166,14 @@ export function getNewNotes(state: NoteFreqMemoryState): string[] {
   return INTRODUCTION_ORDER.filter((note) => !introduced.has(note));
 }
 
-/**
- * Get days since last review for a card.
- */
 function daysSinceReview(card: NoteFreqCard): number {
   if (!card.lastReviewedAt) return Infinity;
-  const now = Date.now();
-  return (now - card.lastReviewedAt) / (1000 * 60 * 60 * 24);
+  return (Date.now() - card.lastReviewedAt) / (1000 * 60 * 60 * 24);
 }
 
-/**
- * Get cards that are due for review (introduced cards sorted by urgency).
- */
 export function getDueCards(state: NoteFreqMemoryState): NoteFreqCard[] {
-  const now = Date.now();
   return state.cards
-    .filter((c) => {
-      if (!c.card || !c.lastReviewedAt) return false;
-      const days = (now - c.lastReviewedAt) / (1000 * 60 * 60 * 24);
-      return days >= 0;
-    })
+    .filter((c) => c.card !== null && c.lastReviewedAt !== null)
     .sort((a, b) => {
       const daysA = daysSinceReview(a);
       const daysB = daysSinceReview(b);
@@ -199,57 +184,45 @@ export function getDueCards(state: NoteFreqMemoryState): NoteFreqCard[] {
 }
 
 export interface SessionCards {
-  newNotes: string[]; // Notes to introduce (both directions for each)
-  reviewCards: NoteFreqCard[]; // Individual cards to review
+  newNotes: string[];
+  reviewCards: NoteFreqCard[];
   isFirstSession: boolean;
   isComplete: boolean;
 }
 
-const MAX_NEW_MAPPINGS_PER_SESSION = 4;
+const MAX_NEW_NOTES_PER_SESSION = 4;
 
-/**
- * Select cards for a session.
- * - First session: introduce first 3 notes from INTRODUCTION_ORDER
- * - Later sessions: up to 4 new notes + reviews
- */
 export function selectSessionCards(state: NoteFreqMemoryState): SessionCards {
   const introduced = getIntroducedNotes(state);
   const newNotes = getNewNotes(state);
   const isFirstSession = introduced.length === 0;
 
-  // All notes introduced
   if (newNotes.length === 0) {
     const dueCards = getDueCards(state);
     return {
       newNotes: [],
-      reviewCards: dueCards.slice(0, 8), // Review up to 8 cards
+      reviewCards: dueCards.slice(0, 10),
       isFirstSession: false,
       isComplete: true,
     };
   }
 
-  // First session: introduce first 3 well-separated notes
   if (isFirstSession) {
-    const notesToIntroduce = newNotes.slice(0, 3);
     return {
-      newNotes: notesToIntroduce,
+      newNotes: newNotes.slice(0, 3),
       reviewCards: [],
       isFirstSession: true,
       isComplete: false,
     };
   }
 
-  // Normal session: introduce up to 4 new notes + reviews
-  const notesToIntroduce = newNotes.slice(0, MAX_NEW_MAPPINGS_PER_SESSION);
-
-  // Get due cards for review (excluding cards for notes we're introducing)
+  const notesToIntroduce = newNotes.slice(0, MAX_NEW_NOTES_PER_SESSION);
   const dueCards = getDueCards(state).filter(
     (c) => !notesToIntroduce.includes(c.note)
   );
 
-  // Aim for a total of ~8-10 cards in session
   const targetTotal = 10;
-  const newCardCount = notesToIntroduce.length * 2; // 2 directions per note
+  const newCardCount = notesToIntroduce.length * 2;
   const reviewCount = Math.max(0, targetTotal - newCardCount);
 
   return {
@@ -266,9 +239,6 @@ export interface ReviewData {
   replayTimesMs?: number[];
 }
 
-/**
- * Record a review result for a specific card.
- */
 export function recordReview(
   state: NoteFreqMemoryState,
   note: string,
@@ -326,9 +296,6 @@ export function recordReview(
   };
 }
 
-/**
- * Increment session count.
- */
 export function incrementSessionCount(
   state: NoteFreqMemoryState
 ): NoteFreqMemoryState {
@@ -338,64 +305,57 @@ export function incrementSessionCount(
   };
 }
 
-/**
- * Get statistics about learning progress.
- */
 export function getStats(state: NoteFreqMemoryState): {
   introducedNotes: number;
   totalNotes: number;
-  introducedCards: number;
-  totalCards: number;
   sessionsCompleted: number;
   totalReviews: number;
 } {
-  const introducedCards = state.cards.filter((c) => c.card !== null).length;
   return {
     introducedNotes: getIntroducedNotes(state).length,
     totalNotes: ALL_MAPPINGS.length,
-    introducedCards,
-    totalCards: state.cards.length,
     sessionsCompleted: state.sessionCount,
     totalReviews: state.history.length,
   };
 }
 
-/**
- * Get the frequency for a note (rounded to nearest Hz).
- */
 export function getFrequencyForNote(note: string): number {
   const mapping = ALL_MAPPINGS.find((m) => m.note === note);
-  return mapping?.frequency ?? 0;
+  if (mapping) return mapping.frequency;
+  return Math.round(NOTE_FREQUENCIES[note] ?? 0);
 }
 
 /**
- * Get nearby notes for choice generation (returns notes sorted chromatically).
- * If allowedNotes is provided, only picks from those notes (plus the target).
+ * Get nearby notes for choice generation (same octave, sorted chromatically).
  */
 export function getNearbyNotes(
   targetNote: string,
   count: number = 4,
   allowedNotes?: string[]
 ): string[] {
-  const targetIndex = NOTE_NAMES_IN_ORDER.indexOf(targetNote);
+  const octave = getOctave(targetNote);
+  const octaveNotes = ALL_MAPPINGS.filter((m) => m.octave === octave).map(
+    (m) => m.note
+  );
+  const targetIndex = octaveNotes.indexOf(targetNote);
   if (targetIndex === -1) return [targetNote];
 
-  // If allowed notes specified, filter to those (plus always include target)
-  const allowedSet = allowedNotes ? new Set([...allowedNotes, targetNote]) : null;
+  const allowedSet = allowedNotes
+    ? new Set([...allowedNotes, targetNote])
+    : null;
 
   const choices = [targetNote];
   let offset = 1;
 
-  // Add notes alternating above and below
-  while (choices.length < count && offset < NOTE_NAMES_IN_ORDER.length) {
-    if (targetIndex + offset < NOTE_NAMES_IN_ORDER.length) {
-      const note = NOTE_NAMES_IN_ORDER[targetIndex + offset];
+  while (choices.length < count && offset < octaveNotes.length) {
+    if (targetIndex + offset < octaveNotes.length) {
+      const note = octaveNotes[targetIndex + offset];
       if (!allowedSet || allowedSet.has(note)) {
         choices.push(note);
       }
     }
     if (choices.length < count && targetIndex - offset >= 0) {
-      const note = NOTE_NAMES_IN_ORDER[targetIndex - offset];
+      const note = octaveNotes[targetIndex - offset];
       if (!allowedSet || allowedSet.has(note)) {
         choices.push(note);
       }
@@ -403,31 +363,35 @@ export function getNearbyNotes(
     offset++;
   }
 
-  // Sort chromatically
   return choices.sort(
-    (a, b) => NOTE_NAMES_IN_ORDER.indexOf(a) - NOTE_NAMES_IN_ORDER.indexOf(b)
+    (a, b) => octaveNotes.indexOf(a) - octaveNotes.indexOf(b)
   );
 }
 
 /**
- * Get nearby frequencies for choice generation (returns frequencies sorted ascending).
- * If allowedNotes is provided, only picks frequencies for those notes (plus the target).
+ * Get nearby frequencies for choice generation (same octave, sorted ascending).
  */
 export function getNearbyFrequencies(
   targetFreq: number,
   count: number = 4,
   allowedNotes?: string[]
 ): number[] {
-  // Get allowed frequencies from allowed notes
+  const targetMapping = ALL_MAPPINGS.find((m) => m.frequency === targetFreq);
+  if (!targetMapping) return [targetFreq];
+
+  const octaveNotes = ALL_MAPPINGS.filter(
+    (m) => m.octave === targetMapping.octave
+  );
+
   let allFreqs: number[];
   if (allowedNotes) {
-    const targetNote = ALL_MAPPINGS.find((m) => m.frequency === targetFreq)?.note;
-    const allowedSet = new Set([...allowedNotes, targetNote].filter(Boolean));
-    allFreqs = ALL_MAPPINGS.filter((m) => allowedSet.has(m.note))
+    const allowedSet = new Set([...allowedNotes, targetMapping.note]);
+    allFreqs = octaveNotes
+      .filter((m) => allowedSet.has(m.note))
       .map((m) => m.frequency)
       .sort((a, b) => a - b);
   } else {
-    allFreqs = ALL_MAPPINGS.map((m) => m.frequency).sort((a, b) => a - b);
+    allFreqs = octaveNotes.map((m) => m.frequency).sort((a, b) => a - b);
   }
 
   const targetIndex = allFreqs.indexOf(targetFreq);
@@ -449,9 +413,6 @@ export function getNearbyFrequencies(
   return choices.sort((a, b) => a - b);
 }
 
-/**
- * Clear all progress and start fresh.
- */
 export function clearAllProgress(): void {
   try {
     localStorage.removeItem(STORAGE_KEY);

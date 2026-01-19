@@ -1,12 +1,10 @@
 /**
  * Note-Frequency Quiz Exercise
  *
- * Spaced repetition training to memorize the bidirectional mapping
- * between musical notes (C4-B4) and their frequencies.
- *
+ * Spaced repetition training for note-frequency mapping across octaves 3, 4, 5.
  * Two question types:
- * - Freq→Note: "This is 440Hz. Which note is it?" → A4
- * - Note→Freq: "This is A4. Which frequency is it?" → 440Hz
+ * - freqToNote: "This is 440Hz. Which note is it?"
+ * - noteToFreq: "This is A4. Which frequency is it?"
  */
 
 import { playFrequency } from "../audio.js";
@@ -22,6 +20,7 @@ import {
   getFrequencyForNote,
   getNearbyNotes,
   getNearbyFrequencies,
+  getOctave,
   getIntroducedNotes,
   NoteFreqMemoryState,
   SessionCards,
@@ -34,17 +33,18 @@ interface CurrentCard {
   note: string;
   direction: QuizDirection;
   frequency: number;
+  octave: number;
   isNew: boolean;
 }
 
 interface ExerciseState {
   memoryState: NoteFreqMemoryState;
   sessionCards: SessionCards;
-  allCards: CurrentCard[]; // All cards for this session
-  allowedNotes: string[]; // Notes that can appear as choices (introduced + session new)
-  correctCounts: Map<string, number>; // key = "note:direction"
+  allCards: CurrentCard[];
+  allowedNotes: string[];
+  correctCounts: Map<string, number>;
   currentCard: CurrentCard;
-  currentChoices: (string | number)[]; // Note names or frequencies
+  currentChoices: (string | number)[];
   eliminatedChoices: Set<string | number>;
   guessHistory: (string | number)[];
   hasAnswered: boolean;
@@ -54,12 +54,10 @@ interface ExerciseState {
   sessionCorrect: number;
   sessionTotal: number;
   inputEnabled: boolean;
-  // Timing
   startTime: number;
   elapsedBeforePause: number;
   pausedAt: number | null;
   replayTimesMs: number[];
-  // Learning sequence
   playingSequence: boolean;
   highlightedChoice: string | number | null;
   sequenceComplete: boolean;
@@ -107,11 +105,24 @@ function setupVisibilityHandler(): void {
 function buildSessionCards(sessionCards: SessionCards): CurrentCard[] {
   const cards: CurrentCard[] = [];
 
-  // Add new notes (both directions for each)
+  // Add cards for new notes (both directions)
   for (const note of sessionCards.newNotes) {
     const frequency = getFrequencyForNote(note);
-    cards.push({ note, direction: "freqToNote", frequency, isNew: true });
-    cards.push({ note, direction: "noteToFreq", frequency, isNew: true });
+    const octave = getOctave(note);
+    cards.push({
+      note,
+      direction: "freqToNote",
+      frequency,
+      octave,
+      isNew: true,
+    });
+    cards.push({
+      note,
+      direction: "noteToFreq",
+      frequency,
+      octave,
+      isNew: true,
+    });
   }
 
   // Add review cards
@@ -121,6 +132,7 @@ function buildSessionCards(sessionCards: SessionCards): CurrentCard[] {
       note: reviewCard.note,
       direction: reviewCard.direction,
       frequency,
+      octave: getOctave(reviewCard.note),
       isNew: false,
     });
   }
@@ -135,14 +147,15 @@ function pickNextCard(
 ): CurrentCard {
   const needsWork = allCards.filter((card) => {
     const key = cardKey(card.note, card.direction);
-    return (correctCounts.get(key) ?? 0) < REQUIRED_CORRECT && key !== excludeKey;
+    return (
+      (correctCounts.get(key) ?? 0) < REQUIRED_CORRECT && key !== excludeKey
+    );
   });
 
   if (needsWork.length === 0) {
     return allCards[0];
   }
 
-  // Sort by correct count (fewest first), then randomize ties
   needsWork.sort((a, b) => {
     const countA = correctCounts.get(cardKey(a.note, a.direction)) ?? 0;
     const countB = correctCounts.get(cardKey(b.note, b.direction)) ?? 0;
@@ -153,12 +166,13 @@ function pickNextCard(
   return needsWork[0];
 }
 
-function getChoices(card: CurrentCard, allowedNotes: string[]): (string | number)[] {
+function getChoices(
+  card: CurrentCard,
+  allowedNotes: string[]
+): (string | number)[] {
   if (card.direction === "freqToNote") {
-    // Question: "This is 440Hz. Which note?" → choices are note names
     return getNearbyNotes(card.note, 4, allowedNotes);
   } else {
-    // Question: "This is A4. Which frequency?" → choices are frequencies
     return getNearbyFrequencies(card.frequency, 4, allowedNotes);
   }
 }
@@ -168,9 +182,9 @@ function initExercise(): void {
   const sessionCards = selectSessionCards(memoryState);
   const allCards = buildSessionCards(sessionCards);
 
-  // Allowed notes = already introduced + notes being introduced this session
-  const introducedNotes = getIntroducedNotes(memoryState);
-  const allowedNotes = [...new Set([...introducedNotes, ...sessionCards.newNotes])];
+  // Allowed notes = introduced + session new notes
+  const introduced = getIntroducedNotes(memoryState);
+  const allowedNotes = [...new Set([...introduced, ...sessionCards.newNotes])];
 
   const correctCounts = new Map<string, number>();
   for (const card of allCards) {
@@ -247,26 +261,50 @@ function handleAnswer(answer: string | number): void {
     state.guessHistory.push(answer);
     state.wasCorrect = false;
 
-    // Determine too high/low based on direction
+    // Determine too high/low
     let isTooHigh: boolean;
     if (state.currentCard.direction === "freqToNote") {
-      // Choices are notes, compare by chromatic position
-      const correctNote = state.currentCard.note;
-      const answerNote = answer as string;
-      const noteOrder = ["C4", "C#4", "D4", "D#4", "E4", "F4", "F#4", "G4", "G#4", "A4", "A#4", "B4"];
-      isTooHigh = noteOrder.indexOf(answerNote) > noteOrder.indexOf(correctNote);
+      const noteOrder = [
+        "C",
+        "C#",
+        "D",
+        "D#",
+        "E",
+        "F",
+        "F#",
+        "G",
+        "G#",
+        "A",
+        "A#",
+        "B",
+      ];
+      const getIndex = (n: string) => noteOrder.indexOf(n.replace(/\d+$/, ""));
+      isTooHigh = getIndex(answer as string) > getIndex(state.currentCard.note);
     } else {
-      // Choices are frequencies
       isTooHigh = (answer as number) > state.currentCard.frequency;
     }
     state.lastFeedback = isTooHigh ? "too-high" : "too-low";
 
-    // Eliminate this choice and all in the wrong direction
+    // Eliminate choices
     for (const choice of state.currentChoices) {
       if (state.currentCard.direction === "freqToNote") {
-        const noteOrder = ["C4", "C#4", "D4", "D#4", "E4", "F4", "F#4", "G4", "G#4", "A4", "A#4", "B4"];
-        const choiceIdx = noteOrder.indexOf(choice as string);
-        const answerIdx = noteOrder.indexOf(answer as string);
+        const noteOrder = [
+          "C",
+          "C#",
+          "D",
+          "D#",
+          "E",
+          "F",
+          "F#",
+          "G",
+          "G#",
+          "A",
+          "A#",
+          "B",
+        ];
+        const getIndex = (n: string) => noteOrder.indexOf(n.replace(/\d+$/, ""));
+        const choiceIdx = getIndex(choice as string);
+        const answerIdx = getIndex(answer as string);
         if (isTooHigh && choiceIdx >= answerIdx) {
           state.eliminatedChoices.add(choice);
         } else if (!isTooHigh && choiceIdx <= answerIdx) {
@@ -287,11 +325,11 @@ function handleAnswer(answer: string | number): void {
 
 function handleGrade(grade: Grade): void {
   const timeMs = Math.round(getElapsedTime());
-  // Cast guessHistory to the correct type based on direction
   const guessHistory =
     state.currentCard.direction === "freqToNote"
       ? (state.guessHistory as string[])
       : (state.guessHistory as number[]);
+
   state.memoryState = recordReview(
     state.memoryState,
     state.currentCard.note,
@@ -305,7 +343,6 @@ function handleGrade(grade: Grade): void {
   );
   saveState(state.memoryState);
 
-  // Only first-try correct counts toward session completion
   if (state.wasCorrect && state.guessHistory.length === 0) {
     const key = cardKey(state.currentCard.note, state.currentCard.direction);
     const current = state.correctCounts.get(key) ?? 0;
@@ -327,7 +364,10 @@ function handleGrade(grade: Grade): void {
 }
 
 function advanceToNext(): void {
-  const currentKey = cardKey(state.currentCard.note, state.currentCard.direction);
+  const currentKey = cardKey(
+    state.currentCard.note,
+    state.currentCard.direction
+  );
   const nextCard = pickNextCard(state.allCards, state.correctCounts, currentKey);
 
   state.currentCard = nextCard;
@@ -368,17 +408,14 @@ async function playLearningSequence(): Promise<void> {
 
   const GAP_MS = 300;
 
-  // Play each choice in order with its corresponding frequency
   for (const choice of state.currentChoices) {
     state.highlightedChoice = choice;
     render();
 
     let freq: number;
     if (state.currentCard.direction === "freqToNote") {
-      // Choices are notes, play their frequencies
       freq = getFrequencyForNote(choice as string);
     } else {
-      // Choices are frequencies
       freq = choice as number;
     }
 
@@ -386,7 +423,6 @@ async function playLearningSequence(): Promise<void> {
     await new Promise((r) => setTimeout(r, GAP_MS));
   }
 
-  // Play correct answer again
   state.highlightedChoice = getCorrectAnswer();
   render();
   await playFrequency(state.currentCard.frequency, { duration: NOTE_DURATION });
@@ -438,7 +474,7 @@ function render(): void {
     })
     .join("");
 
-  // Feedback (shown above choices)
+  // Feedback
   let feedbackHtml = "";
   if (state.playingSequence) {
     feedbackHtml = `<div class="feedback">Playing sequence...</div>`;
@@ -452,7 +488,6 @@ function render(): void {
     feedbackHtml = `<div class="feedback error">${feedbackText}</div>`;
   }
 
-  // After answer controls
   let afterAnswer = "";
   if (state.sequenceComplete) {
     afterAnswer = `
@@ -489,8 +524,8 @@ function render(): void {
           <span>${state.sessionCorrect}/${state.sessionTotal}</span>
         </div>
         <div class="stats">
-          <span class="stats-label">Notes learned:</span>
-          <span>${stats.introducedNotes}/${stats.totalNotes}</span>
+          <span class="stats-label">Progress:</span>
+          <span>${stats.introducedNotes}/${stats.totalNotes} notes</span>
         </div>
         <div class="stats">
           <span class="stats-label">Sessions:</span>
@@ -498,12 +533,12 @@ function render(): void {
         </div>
       </div>
 
-      <p class="keyboard-hint">Keys 1-4 to select</p>
+      <p class="keyboard-hint">Keys 1-${choices.length} to select</p>
     </div>
 
     <div class="danger-zone">
       <button class="danger-btn" id="clear-history-btn">Clear Progress</button>
-      <p class="danger-warning">Reset all learning history (frequencies rounded to nearest Hz)</p>
+      <p class="danger-warning">Reset all learning history</p>
     </div>
   `;
 
@@ -582,7 +617,6 @@ function setupEventListeners(): void {
     btn.addEventListener("click", () => {
       if (!state.hasAnswered) {
         const choiceStr = (btn as HTMLElement).dataset.choice || "";
-        // Parse choice back to correct type
         let choice: string | number;
         if (state.currentCard.direction === "noteToFreq") {
           choice = parseInt(choiceStr, 10);
@@ -634,7 +668,10 @@ function setupEventListeners(): void {
       return;
     }
 
-    if (state.sequenceComplete && (e.key === "Enter" || e.key === "c" || e.key === "C")) {
+    if (
+      state.sequenceComplete &&
+      (e.key === "Enter" || e.key === "c" || e.key === "C")
+    ) {
       e.preventDefault();
       handleGrade(Grade.AGAIN);
       return;
@@ -643,7 +680,7 @@ function setupEventListeners(): void {
     const num = parseInt(e.key, 10);
 
     if (!state.hasAnswered) {
-      if (num >= 1 && num <= 4 && num <= choices.length) {
+      if (num >= 1 && num <= choices.length) {
         e.preventDefault();
         handleAnswer(choices[num - 1]);
       }

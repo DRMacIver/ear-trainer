@@ -38,10 +38,13 @@ const localStorageMock = (() => {
 Object.defineProperty(globalThis, "localStorage", { value: localStorageMock });
 
 describe("ALL_MAPPINGS", () => {
-  it("contains 12 note-frequency mappings for octave 4", () => {
-    expect(ALL_MAPPINGS.length).toBe(12);
-    expect(ALL_MAPPINGS[0].note).toBe("C4");
-    expect(ALL_MAPPINGS[11].note).toBe("B4");
+  it("contains 36 note-frequency mappings (3 octaves × 12 notes)", () => {
+    expect(ALL_MAPPINGS.length).toBe(36);
+  });
+
+  it("starts with C3 and ends with B5", () => {
+    expect(ALL_MAPPINGS[0].note).toBe("C3");
+    expect(ALL_MAPPINGS[35].note).toBe("B5");
   });
 
   it("includes A4 at 440Hz", () => {
@@ -62,19 +65,57 @@ describe("ALL_MAPPINGS", () => {
       );
     }
   });
+
+  it("covers octaves 3, 4, and 5", () => {
+    const octaves = new Set(ALL_MAPPINGS.map((m) => m.octave));
+    expect(octaves).toEqual(new Set([3, 4, 5]));
+  });
 });
 
 describe("INTRODUCTION_ORDER", () => {
-  it("contains all 12 notes", () => {
-    expect(INTRODUCTION_ORDER.length).toBe(12);
+  it("contains all 36 notes", () => {
+    expect(INTRODUCTION_ORDER.length).toBe(36);
     const notes = new Set(INTRODUCTION_ORDER);
-    expect(notes.size).toBe(12);
+    expect(notes.size).toBe(36);
   });
 
-  it("starts with well-separated notes (C4, A4, F4)", () => {
+  it("starts with octave 4 non-sharps (C4, A4, F4)", () => {
     expect(INTRODUCTION_ORDER[0]).toBe("C4");
     expect(INTRODUCTION_ORDER[1]).toBe("A4");
     expect(INTRODUCTION_ORDER[2]).toBe("F4");
+  });
+
+  it("introduces octave 4 non-sharps before sharps", () => {
+    const nonSharps = ["C4", "A4", "F4", "D4", "G4", "B4", "E4"];
+    const sharps = ["C#4", "F#4", "D#4", "G#4", "A#4"];
+
+    const lastNonSharpIdx = Math.max(
+      ...nonSharps.map((n) => INTRODUCTION_ORDER.indexOf(n))
+    );
+    const firstSharpIdx = Math.min(
+      ...sharps.map((n) => INTRODUCTION_ORDER.indexOf(n))
+    );
+
+    expect(lastNonSharpIdx).toBeLessThan(firstSharpIdx);
+  });
+
+  it("introduces octave 4 before octaves 3 and 5", () => {
+    const octave4Notes = INTRODUCTION_ORDER.filter((n) => n.includes("4"));
+    const octave3Notes = INTRODUCTION_ORDER.filter((n) => n.includes("3"));
+    const octave5Notes = INTRODUCTION_ORDER.filter((n) => n.includes("5"));
+
+    const lastOctave4Idx = Math.max(
+      ...octave4Notes.map((n) => INTRODUCTION_ORDER.indexOf(n))
+    );
+    const firstOctave3Idx = Math.min(
+      ...octave3Notes.map((n) => INTRODUCTION_ORDER.indexOf(n))
+    );
+    const firstOctave5Idx = Math.min(
+      ...octave5Notes.map((n) => INTRODUCTION_ORDER.indexOf(n))
+    );
+
+    expect(lastOctave4Idx).toBeLessThan(firstOctave3Idx);
+    expect(lastOctave4Idx).toBeLessThan(firstOctave5Idx);
   });
 });
 
@@ -85,7 +126,7 @@ describe("loadState / saveState", () => {
 
   it("returns initial state when nothing saved", () => {
     const state = loadState();
-    expect(state.cards.length).toBe(24); // 12 notes * 2 directions
+    expect(state.cards.length).toBe(72); // 36 notes * 2 directions
     expect(state.history).toEqual([]);
     expect(state.sessionCount).toBe(0);
     expect(state.cards.every((c) => c.card === null)).toBe(true);
@@ -101,9 +142,9 @@ describe("loadState / saveState", () => {
   });
 
   it("handles corrupted localStorage gracefully", () => {
-    localStorageMock.setItem("ear-trainer:note-freq-memory", "invalid json");
+    localStorageMock.setItem("ear-trainer:note-freq-memory-v2", "invalid json");
     const state = loadState();
-    expect(state.cards.length).toBe(24);
+    expect(state.cards.length).toBe(72);
   });
 });
 
@@ -115,7 +156,7 @@ describe("getIntroducedNotes / getNewNotes", () => {
   it("all notes are new initially", () => {
     const state = loadState();
     expect(getIntroducedNotes(state)).toEqual([]);
-    expect(getNewNotes(state).length).toBe(12);
+    expect(getNewNotes(state).length).toBe(36);
   });
 
   it("tracks introduced notes after both directions reviewed", () => {
@@ -126,7 +167,7 @@ describe("getIntroducedNotes / getNewNotes", () => {
 
     expect(getIntroducedNotes(state)).toContain("A4");
     expect(getIntroducedNotes(state).length).toBe(1);
-    expect(getNewNotes(state).length).toBe(11);
+    expect(getNewNotes(state).length).toBe(35);
   });
 
   it("does not count note as introduced if only one direction reviewed", () => {
@@ -134,7 +175,7 @@ describe("getIntroducedNotes / getNewNotes", () => {
     state = recordReview(state, "A4", "freqToNote", Grade.GOOD);
 
     expect(getIntroducedNotes(state)).not.toContain("A4");
-    expect(getNewNotes(state).length).toBe(12);
+    expect(getNewNotes(state).length).toBe(36);
   });
 });
 
@@ -294,9 +335,7 @@ describe("getStats", () => {
     const stats = getStats(state);
 
     expect(stats.introducedNotes).toBe(0);
-    expect(stats.totalNotes).toBe(12);
-    expect(stats.introducedCards).toBe(0);
-    expect(stats.totalCards).toBe(24);
+    expect(stats.totalNotes).toBe(36);
     expect(stats.sessionsCompleted).toBe(0);
     expect(stats.totalReviews).toBe(0);
   });
@@ -310,7 +349,6 @@ describe("getStats", () => {
 
     const stats = getStats(state);
     expect(stats.introducedNotes).toBe(1);
-    expect(stats.introducedCards).toBe(2);
     expect(stats.totalReviews).toBe(3);
     expect(stats.sessionsCompleted).toBe(1);
   });
@@ -323,6 +361,11 @@ describe("getFrequencyForNote", () => {
 
   it("returns correct frequency for C4", () => {
     expect(getFrequencyForNote("C4")).toBe(262);
+  });
+
+  it("returns correct frequency for notes in other octaves", () => {
+    expect(getFrequencyForNote("A3")).toBe(220);
+    expect(getFrequencyForNote("A5")).toBe(880);
   });
 
   it("returns 0 for unknown note", () => {
@@ -388,6 +431,16 @@ describe("getNearbyNotes", () => {
     expect(notes.length).toBe(4);
     expect(notes).toContain("B4");
   });
+
+  it("works with notes in different octaves", () => {
+    const notes3 = getNearbyNotes("A3", 4);
+    expect(notes3).toContain("A3");
+    expect(notes3.every((n) => n.endsWith("3"))).toBe(true);
+
+    const notes5 = getNearbyNotes("A5", 4);
+    expect(notes5).toContain("A5");
+    expect(notes5.every((n) => n.endsWith("5"))).toBe(true);
+  });
 });
 
 describe("getNearbyFrequencies", () => {
@@ -404,18 +457,18 @@ describe("getNearbyFrequencies", () => {
     }
   });
 
-  it("handles edge case at lowest frequency", () => {
-    const lowestFreq = ALL_MAPPINGS[0].frequency;
-    const freqs = getNearbyFrequencies(lowestFreq, 4);
+  it("handles edge case at lowest frequency in octave", () => {
+    const c4Freq = ALL_MAPPINGS.find((m) => m.note === "C4")!.frequency;
+    const freqs = getNearbyFrequencies(c4Freq, 4);
     expect(freqs.length).toBe(4);
-    expect(freqs).toContain(lowestFreq);
+    expect(freqs).toContain(c4Freq);
   });
 
-  it("handles edge case at highest frequency", () => {
-    const highestFreq = ALL_MAPPINGS[11].frequency;
-    const freqs = getNearbyFrequencies(highestFreq, 4);
+  it("handles edge case at highest frequency in octave", () => {
+    const b4Freq = ALL_MAPPINGS.find((m) => m.note === "B4")!.frequency;
+    const freqs = getNearbyFrequencies(b4Freq, 4);
     expect(freqs.length).toBe(4);
-    expect(freqs).toContain(highestFreq);
+    expect(freqs).toContain(b4Freq);
   });
 
   it("filters to allowed notes when provided", () => {
@@ -430,6 +483,16 @@ describe("getNearbyFrequencies", () => {
     for (const freq of freqs) {
       expect(allowedFreqs).toContain(freq);
     }
+  });
+
+  it("works with frequencies in different octaves", () => {
+    const a3Freq = 220;
+    const freqs3 = getNearbyFrequencies(a3Freq, 4);
+    expect(freqs3).toContain(a3Freq);
+
+    const a5Freq = 880;
+    const freqs5 = getNearbyFrequencies(a5Freq, 4);
+    expect(freqs5).toContain(a5Freq);
   });
 });
 
