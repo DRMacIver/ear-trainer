@@ -16,7 +16,7 @@ export const LEARNING_ORDER: FullTone[] = ["C", "G", "E", "A", "D", "F", "B"];
 const FAMILIARITY_WINDOW = 4;
 /** Minimum correct in window to be considered familiar with a pairing */
 const FAMILIARITY_THRESHOLD = 3;
-/** Number of questions to repeat the same target */
+/** Number of consecutive correct answers needed to move to next target */
 export const STREAK_LENGTH = 3;
 
 export interface QuestionRecord {
@@ -41,7 +41,8 @@ export interface ToneQuizState {
   // Sticky target state
   currentTarget: FullTone | null;
   currentTargetOctave: number | null;
-  streakCount: number;
+  correctStreak: number; // Consecutive correct answers on current target
+  isFirstOnTarget: boolean; // Whether next question is first on this target
 }
 
 function createInitialState(): ToneQuizState {
@@ -52,7 +53,8 @@ function createInitialState(): ToneQuizState {
     performance: {},
     currentTarget: null,
     currentTargetOctave: null,
-    streakCount: 0,
+    correctStreak: 0,
+    isFirstOnTarget: true,
   };
 }
 
@@ -216,26 +218,30 @@ export function selectOtherNote(
 
 /**
  * Select target note, respecting stickiness.
- * Returns [target, octave, isNewTarget, updatedState]
+ * Stays on same target until user gets STREAK_LENGTH correct in a row.
+ * Returns [target, octave, isNewTarget, isFirstOnTarget, updatedState]
  */
 export function selectTargetNote(
   state: ToneQuizState,
   pickOctave: (note: FullTone) => number
-): [FullTone, number, boolean, ToneQuizState] {
-  // Check if we should continue the streak
+): [FullTone, number, boolean, boolean, ToneQuizState] {
+  // Check if we should continue with current target (haven't got 3 correct yet)
   if (
     state.currentTarget &&
     state.currentTargetOctave !== null &&
-    state.streakCount < STREAK_LENGTH
+    state.correctStreak < STREAK_LENGTH
   ) {
+    const isFirst = state.isFirstOnTarget;
     return [
       state.currentTarget,
       state.currentTargetOctave,
       false,
-      { ...state, streakCount: state.streakCount + 1 },
+      isFirst,
+      { ...state, isFirstOnTarget: false },
     ];
   }
 
+  // Got 3 correct in a row (or first time) - pick a new target
   // Check if we should add a new note to vocabulary
   let newVocabulary = state.learningVocabulary;
   if (allVocabularyFamiliar(state)) {
@@ -256,14 +262,28 @@ export function selectTargetNote(
     newTarget,
     newOctave,
     true,
+    true, // First question on new target
     {
       ...state,
       learningVocabulary: newVocabulary,
       currentTarget: newTarget,
       currentTargetOctave: newOctave,
-      streakCount: 1,
+      correctStreak: 0,
+      isFirstOnTarget: false,
     },
   ];
+}
+
+/**
+ * Update streak after answering a question.
+ * Correct: increment streak. Wrong: reset to 0.
+ */
+export function updateStreak(state: ToneQuizState, wasCorrect: boolean): ToneQuizState {
+  if (wasCorrect) {
+    return { ...state, correctStreak: state.correctStreak + 1 };
+  } else {
+    return { ...state, correctStreak: 0 };
+  }
 }
 
 /**

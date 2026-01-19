@@ -14,6 +14,7 @@ import {
   recordQuestion,
   selectTargetNote,
   selectOtherNote,
+  updateStreak,
   ToneQuizState,
   FullTone,
   STREAK_LENGTH,
@@ -58,11 +59,9 @@ function pickOctave(family: FullTone): number {
 }
 
 function initQuestion(): boolean {
-  // Select target note (with stickiness)
-  const [targetNote, targetOctave, isNewTarget, updatedState] = selectTargetNote(
-    persistentState,
-    pickOctave
-  );
+  // Select target note (with stickiness - stays until 3 correct in a row)
+  const [targetNote, targetOctave, isNewTarget, isFirstOnTarget, updatedState] =
+    selectTargetNote(persistentState, pickOctave);
   persistentState = updatedState;
 
   // Select other note based on current learning progress
@@ -87,7 +86,7 @@ function initQuestion(): boolean {
     otherNote,
     hasAnswered: false,
     wasCorrect: null,
-    isFirstInStreak: persistentState.streakCount === 1,
+    isFirstInStreak: isFirstOnTarget,
     startTime: Date.now(),
   };
 
@@ -113,10 +112,7 @@ function render(): void {
   const recentCorrect = recentHistory.filter((r) => r.correct).length;
   const totalPlayed = persistentState.history.length;
   const vocabDisplay = persistentState.learningVocabulary.join(", ");
-  const streakInfo =
-    persistentState.streakCount > 0
-      ? `(${persistentState.streakCount}/${STREAK_LENGTH})`
-      : "";
+  const streakInfo = `(${persistentState.correctStreak}/${STREAK_LENGTH} correct)`;
 
   app.innerHTML = `
     <a href="#/" class="back-link">&larr; Back to exercises</a>
@@ -254,7 +250,7 @@ function handleChoice(chosenIndex: number): void {
   question.hasAnswered = true;
   question.wasCorrect = isCorrect;
 
-  // Record to persistent state
+  // Record to persistent state and update streak
   persistentState = recordQuestion(persistentState, {
     timestamp: Date.now(),
     noteA: question.noteA,
@@ -265,6 +261,7 @@ function handleChoice(chosenIndex: number): void {
     wasFirstInStreak: question.isFirstInStreak,
     timeMs: Date.now() - question.startTime,
   });
+  persistentState = updateStreak(persistentState, isCorrect);
   saveState(persistentState);
 
   renderChoiceButtons();
