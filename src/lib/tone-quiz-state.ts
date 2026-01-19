@@ -19,6 +19,13 @@ const FAMILIARITY_THRESHOLD = 3;
 /** Number of consecutive correct answers needed to move to next target */
 export const STREAK_LENGTH = 3;
 
+/** Probability of selecting the next candidate note as "other" */
+const CANDIDATE_SELECTION_CHANCE = 0.2;
+/** Consecutive correct needed against each closest note to introduce candidate */
+const CANDIDATE_STREAK_THRESHOLD = 5;
+/** Maximum questions without introduction before forcing it */
+const MAX_QUESTIONS_WITHOUT_INTRODUCTION = 30;
+
 export interface QuestionRecord {
   timestamp: number;
   noteA: string; // Note played first (with octave, e.g., "C4")
@@ -43,6 +50,10 @@ export interface ToneQuizState {
   currentTargetOctave: number | null;
   correctStreak: number; // Consecutive correct answers on current target
   isFirstOnTarget: boolean; // Whether next question is first on this target
+
+  // Candidate introduction tracking
+  candidateStreaks: Record<string, number>; // "target-candidate" -> consecutive correct
+  questionsSinceLastIntroduction: number;
 }
 
 function createInitialState(): ToneQuizState {
@@ -55,6 +66,8 @@ function createInitialState(): ToneQuizState {
     currentTargetOctave: null,
     correctStreak: 0,
     isFirstOnTarget: true,
+    candidateStreaks: {},
+    questionsSinceLastIntroduction: 0,
   };
 }
 
@@ -101,6 +114,41 @@ export function getNoteDistance(a: FullTone, b: FullTone): number {
 }
 
 /**
+ * Get the two closest notes to a candidate from the vocabulary.
+ * Returns sorted by distance (closest first).
+ */
+export function getClosestVocabularyNotes(
+  vocabulary: FullTone[],
+  candidate: FullTone
+): FullTone[] {
+  const withDistances = vocabulary
+    .filter((n) => n !== candidate)
+    .map((n) => ({ note: n, distance: getNoteDistance(n, candidate) }))
+    .sort((a, b) => a.distance - b.distance);
+
+  // Return up to 2 closest notes
+  return withDistances.slice(0, 2).map((x) => x.note);
+}
+
+/**
+ * Check if the candidate is ready to be introduced based on streak performance.
+ * Requires CANDIDATE_STREAK_THRESHOLD consecutive correct against each of the
+ * two closest vocabulary notes.
+ */
+export function isCandidateReadyByStreak(
+  state: ToneQuizState,
+  candidate: FullTone
+): boolean {
+  const closest = getClosestVocabularyNotes(state.learningVocabulary, candidate);
+  if (closest.length < 2) return false; // Need at least 2 vocabulary notes
+
+  return closest.every((target) => {
+    const key = `${target}-${candidate}`;
+    return (state.candidateStreaks[key] ?? 0) >= CANDIDATE_STREAK_THRESHOLD;
+  });
+}
+
+/**
  * Check if the user is familiar with distinguishing target from other.
  */
 export function isFamiliarWith(
@@ -121,13 +169,6 @@ export function isFamiliarWith(
 export function isNoteFamiliar(state: ToneQuizState, note: FullTone): boolean {
   const [lower, upper] = getAdjacentNotes(note);
   return isFamiliarWith(state, note, lower) && isFamiliarWith(state, note, upper);
-}
-
-/**
- * Check if all notes in vocabulary are familiar.
- */
-export function allVocabularyFamiliar(state: ToneQuizState): boolean {
-  return state.learningVocabulary.every((note) => isNoteFamiliar(state, note));
 }
 
 /**
@@ -153,6 +194,8 @@ export function recordQuestion(
     ...state,
     history: [...state.history, record],
     lastPlayedAt: record.timestamp,
+    questionsSinceLastIntroduction: state.questionsSinceLastIntroduction + 1,
+    candidateStreaks: { ...state.candidateStreaks },
   };
 
   // Only update performance if this was first in streak
@@ -170,6 +213,18 @@ export function recordQuestion(
       ...newState.performance[target][other],
       record.correct,
     ];
+
+    // Track candidate streaks when the "other" note is the next candidate
+    const candidate = getNextNoteToLearn(state);
+    if (candidate && other === candidate) {
+      const key = `${target}-${candidate}`;
+      if (record.correct) {
+        newState.candidateStreaks[key] = (newState.candidateStreaks[key] ?? 0) + 1;
+      } else {
+        // Reset streak on wrong answer
+        newState.candidateStreaks[key] = 0;
+      }
+    }
   }
 
   return newState;
@@ -210,11 +265,18 @@ function selectWeighted(candidates: FullTone[]): FullTone {
  * Select an "other" note for a question about the target.
  * Starts with distant notes, gets closer as user improves.
  * Ensures 50% higher / 50% lower to prevent pitch-based guessing.
+ * 20% chance to select the next candidate note (for introduction testing).
  */
 export function selectOtherNote(
   state: ToneQuizState,
   target: FullTone
 ): FullTone {
+  // 20% chance to select the next candidate note (if one exists)
+  const candidate = getNextNoteToLearn(state);
+  if (candidate && candidate !== target && Math.random() < CANDIDATE_SELECTION_CHANCE) {
+    return candidate;
+  }
+
   // First decide: should the other note be higher or lower?
   const wantHigher = Math.random() < 0.5;
 
@@ -275,10 +337,20 @@ export function selectTargetNote(
   // Got 3 correct in a row (or first time) - pick a new target
   // Check if we should add a new note to vocabulary
   let newVocabulary = state.learningVocabulary;
-  if (allVocabularyFamiliar(state)) {
-    const nextNote = getNextNoteToLearn(state);
-    if (nextNote) {
+  let shouldResetCandidateTracking = false;
+  const nextNote = getNextNoteToLearn(state);
+
+  if (nextNote) {
+    // Introduce new note if:
+    // 1. Candidate has 5 consecutive correct against each of its two closest vocabulary notes
+    // 2. OR 30 questions have passed without a new introduction
+    const readyByStreak = isCandidateReadyByStreak(state, nextNote);
+    const readyByTime =
+      state.questionsSinceLastIntroduction >= MAX_QUESTIONS_WITHOUT_INTRODUCTION;
+
+    if (readyByStreak || readyByTime) {
       newVocabulary = [...state.learningVocabulary, nextNote];
+      shouldResetCandidateTracking = true;
     }
   }
 
@@ -304,6 +376,11 @@ export function selectTargetNote(
       currentTargetOctave: newOctave,
       correctStreak: 0,
       isFirstOnTarget: false,
+      // Reset candidate tracking when a new note is introduced
+      candidateStreaks: shouldResetCandidateTracking ? {} : state.candidateStreaks,
+      questionsSinceLastIntroduction: shouldResetCandidateTracking
+        ? 0
+        : state.questionsSinceLastIntroduction,
     },
   ];
 }
