@@ -23,6 +23,7 @@ import {
   getNearbyFamilies,
   getOctave,
   getNoteFamily,
+  getIntroducedFamilies,
   NoteIdMemoryState,
   SessionCards,
   NoteIdCard,
@@ -58,6 +59,7 @@ interface ExerciseState {
   pausedAt: number | null;
   replayTimesMs: number[];
   playingSequence: boolean;
+  playingOctaveTeaching: boolean;
   highlightedChoice: string | number | null;
   sequenceComplete: boolean;
 }
@@ -137,15 +139,31 @@ function pickNextQuestion(
   return needsWork[0];
 }
 
-function getChoices(card: NoteIdCard): (string | number)[] {
+function getChoices(
+  card: NoteIdCard,
+  memoryState: NoteIdMemoryState
+): (string | number)[] {
   if (card.questionType === "octaveId") {
     // Always offer 3, 4, 5 as choices
     return OCTAVES;
   }
 
   if (card.questionType === "noteSequence") {
-    // Get nearby note families (always show 4 choices)
-    return getNearbyFamilies(card.noteFamily!, 4);
+    // Get nearby note families, but filter out sharps that haven't been introduced
+    const introducedFamilies = getIntroducedFamilies(memoryState);
+    const introducedSharps = introducedFamilies.filter((f) => f.includes("#"));
+    // Allow all non-sharps + only introduced sharps
+    const allowedFamilies = [
+      "C",
+      "D",
+      "E",
+      "F",
+      "G",
+      "A",
+      "B",
+      ...introducedSharps,
+    ];
+    return getNearbyFamilies(card.noteFamily!, 4, allowedFamilies);
   }
 
   if (card.questionType === "fullNote") {
@@ -187,7 +205,7 @@ function initExercise(): void {
     allQuestions,
     correctCounts,
     currentQuestion: firstQuestion,
-    currentChoices: getChoices(firstQuestion.card),
+    currentChoices: getChoices(firstQuestion.card, memoryState),
     eliminatedChoices: new Set(),
     guessHistory: [],
     hasAnswered: false,
@@ -202,6 +220,7 @@ function initExercise(): void {
     pausedAt: document.hidden ? performance.now() : null,
     replayTimesMs: [],
     playingSequence: false,
+    playingOctaveTeaching: false,
     highlightedChoice: null,
     sequenceComplete: false,
   };
@@ -343,6 +362,14 @@ function handleAnswer(answer: string | number): void {
     }
 
     render();
+
+    // For octaveId, play teaching sequence: wrong octave then correct octave
+    if (state.currentQuestion.card.questionType === "octaveId") {
+      playOctaveTeachingSequence(
+        answer as number,
+        correctAnswer as number
+      );
+    }
   }
 }
 
@@ -393,7 +420,7 @@ function advanceToNext(): void {
   );
 
   state.currentQuestion = nextQuestion;
-  state.currentChoices = getChoices(nextQuestion.card);
+  state.currentChoices = getChoices(nextQuestion.card, state.memoryState);
   state.eliminatedChoices = new Set();
   state.guessHistory = [];
   state.hasAnswered = false;
@@ -406,6 +433,7 @@ function advanceToNext(): void {
   state.pausedAt = document.hidden ? performance.now() : null;
   state.replayTimesMs = [];
   state.playingSequence = false;
+  state.playingOctaveTeaching = false;
   state.highlightedChoice = null;
   state.sequenceComplete = false;
 
@@ -439,6 +467,59 @@ async function playCurrentSound(): Promise<void> {
 async function handleReplay(): Promise<void> {
   state.replayTimesMs.push(Math.round(getElapsedTime()));
   await playCurrentSound();
+}
+
+/**
+ * Play teaching sequence for wrong octave answer:
+ * 1. Play the note in the wrong octave they chose
+ * 2. Then play the note in the correct octave
+ */
+async function playOctaveTeachingSequence(
+  wrongOctave: number,
+  correctOctave: number
+): Promise<void> {
+  state.playingOctaveTeaching = true;
+  state.inputEnabled = false;
+  render();
+
+  const card = state.currentQuestion.card;
+  const family = getNoteFamily(card.note!);
+
+  // Play the wrong octave (what they chose)
+  state.highlightedChoice = wrongOctave;
+  render();
+  const wrongNote = `${family}${wrongOctave}`;
+  const wrongFreq = getFrequencyForNote(wrongNote);
+  await playFrequency(wrongFreq, { duration: NOTE_DURATION });
+  await new Promise((r) => setTimeout(r, SEQUENCE_GAP_MS));
+
+  // Play the correct octave
+  state.highlightedChoice = correctOctave;
+  render();
+  const correctNote = `${family}${correctOctave}`;
+  const correctFreq = getFrequencyForNote(correctNote);
+  await playFrequency(correctFreq, { duration: NOTE_DURATION });
+
+  state.highlightedChoice = null;
+  state.playingOctaveTeaching = false;
+  state.inputEnabled = true;
+  render();
+}
+
+/**
+ * Play a single octave's note (for clicking octave buttons after answering).
+ */
+async function playOctaveNote(octave: number): Promise<void> {
+  const card = state.currentQuestion.card;
+  const family = getNoteFamily(card.note!);
+  const note = `${family}${octave}`;
+  const freq = getFrequencyForNote(note);
+
+  state.highlightedChoice = octave;
+  render();
+  await playFrequency(freq, { duration: NOTE_DURATION });
+  state.highlightedChoice = null;
+  render();
 }
 
 async function playLearningSequence(): Promise<void> {
@@ -555,13 +636,29 @@ function render(): void {
   const questionText = getQuestionText(card);
   const typeLabel = getQuestionTypeLabel(card);
 
+  const isOctaveId = card.questionType === "octaveId";
   const choiceButtons = choices
     .map((choice, idx) => {
       let className = "choice-btn nf-choice";
       const isEliminated = state.eliminatedChoices.has(choice);
       const isCorrect = state.hasAnswered && choice === correctAnswer;
-      const isDisabled =
-        isEliminated || state.playingSequence || state.sequenceComplete;
+
+      // For octaveId, keep buttons clickable after answering (to allow exploration)
+      // But disable during sequence playback or teaching playback
+      let isDisabled: boolean;
+      if (isOctaveId && state.hasAnswered) {
+        // After answering octaveId, only disable during playback
+        isDisabled =
+          state.playingSequence ||
+          state.playingOctaveTeaching ||
+          state.sequenceComplete;
+      } else {
+        isDisabled =
+          isEliminated ||
+          state.playingSequence ||
+          state.playingOctaveTeaching ||
+          state.sequenceComplete;
+      }
 
       if (state.highlightedChoice === choice) {
         className += " highlighted";
@@ -571,7 +668,9 @@ function render(): void {
         className += " eliminated";
       }
 
-      return `<button class="${className}" data-choice="${choice}" data-idx="${idx}" ${isDisabled ? "disabled" : ""}>${formatChoice(choice, card.questionType)}</button>`;
+      // Add data attribute to indicate if this is for exploration (post-answer octaveId)
+      const isExploration = isOctaveId && state.hasAnswered;
+      return `<button class="${className}" data-choice="${choice}" data-idx="${idx}" data-exploration="${isExploration}" ${isDisabled ? "disabled" : ""}>${formatChoice(choice, card.questionType)}</button>`;
     })
     .join("");
 
@@ -579,10 +678,16 @@ function render(): void {
   let feedbackHtml = "";
   if (state.playingSequence) {
     feedbackHtml = `<div class="feedback">Playing sequence...</div>`;
+  } else if (state.playingOctaveTeaching) {
+    feedbackHtml = `<div class="feedback">Listen to the difference...</div>`;
   } else if (state.sequenceComplete) {
     feedbackHtml = `<div class="feedback success">The answer was ${formatChoice(correctAnswer, card.questionType)}</div>`;
   } else if (state.hasAnswered) {
-    feedbackHtml = `<div class="feedback success">Correct!</div>`;
+    if (isOctaveId) {
+      feedbackHtml = `<div class="feedback success">Correct! Click octaves to compare.</div>`;
+    } else {
+      feedbackHtml = `<div class="feedback success">Correct!</div>`;
+    }
   } else if (state.lastFeedback) {
     const feedbackText =
       state.lastFeedback === "too-high" ? "Too high!" : "Too low!";
@@ -730,15 +835,20 @@ function setupEventListeners(): void {
   const choiceButtons = document.querySelectorAll(".nf-choice");
   choiceButtons.forEach((btn) => {
     btn.addEventListener("click", () => {
-      if (!state.hasAnswered) {
-        const choiceStr = (btn as HTMLElement).dataset.choice || "";
-        let choice: string | number;
-        if (state.currentQuestion.card.questionType === "octaveId") {
-          choice = parseInt(choiceStr, 10);
-        } else {
-          choice = choiceStr;
+      const choiceStr = (btn as HTMLElement).dataset.choice || "";
+      const isExploration =
+        (btn as HTMLElement).dataset.exploration === "true";
+
+      if (state.currentQuestion.card.questionType === "octaveId") {
+        const octave = parseInt(choiceStr, 10);
+        if (!state.hasAnswered) {
+          handleAnswer(octave);
+        } else if (isExploration && !state.playingOctaveTeaching) {
+          // After answering, clicking plays that octave's note
+          playOctaveNote(octave);
         }
-        handleAnswer(choice);
+      } else if (!state.hasAnswered) {
+        handleAnswer(choiceStr);
       }
     });
   });
