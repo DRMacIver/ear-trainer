@@ -289,11 +289,14 @@ export function selectTargetNote(
   const newTarget = candidates[Math.floor(Math.random() * candidates.length)];
   const newOctave = pickOctave(newTarget);
 
+  // Only count as "new target" if it actually changed
+  const actuallyChanged = newTarget !== state.currentTarget;
+
   return [
     newTarget,
     newOctave,
-    true,
-    true, // First question on new target
+    actuallyChanged,
+    true, // First question on new target (for familiarity tracking)
     {
       ...state,
       learningVocabulary: newVocabulary,
