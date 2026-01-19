@@ -369,17 +369,20 @@ function render(): void {
     .map((freq) => {
       let className = "choice-btn freq-choice";
       const isEliminated = state.eliminatedChoices.has(freq);
+      const isCorrect = state.hasAnswered && freq === state.currentFrequency;
+      const isDisabled =
+        isEliminated || state.playingSequence || state.sequenceComplete;
 
       if (state.highlightedFreq === freq) {
         // Currently playing this tone in sequence
         className += " highlighted";
-      } else if (state.hasAnswered && freq === state.currentFrequency) {
+      } else if (isCorrect) {
         className += " correct";
       } else if (isEliminated) {
         className += " eliminated";
       }
 
-      return `<button class="${className}" data-freq="${freq}" ${isEliminated ? "disabled" : ""}>${formatFrequency(freq)}</button>`;
+      return `<button class="${className}" data-freq="${freq}" ${isDisabled ? "disabled" : ""}>${formatFrequency(freq)}</button>`;
     })
     .join("");
 

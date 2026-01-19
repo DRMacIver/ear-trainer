@@ -1047,6 +1047,17 @@ a:hover {
   margin: 1rem 0;
 }
 
+/* Disable hover effects during sequence playback */
+.freq-choice:disabled:not(.highlighted) {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Smooth transition for highlighting */
+.freq-choice {
+  transition: all 0.15s ease-out;
+}
+
 /* Danger Zone */
 .danger-zone {
   margin-top: 3rem;
