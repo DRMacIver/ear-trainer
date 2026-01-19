@@ -43,12 +43,56 @@ interface ExerciseState {
   sessionTotal: number;
   inputEnabled: boolean;
   isNewCard: boolean;
+  // Timing (pauses when tabbed away)
+  startTime: number; // When current card started (performance.now())
+  elapsedBeforePause: number; // Accumulated time before current pause
+  pausedAt: number | null; // When we paused (null if not paused)
+  replayTimesMs: number[]; // When replay was pressed (relative to start)
 }
 
 const REQUIRED_CORRECT = 2; // Each card needs this many correct answers
 
 let state: ExerciseState;
 let keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
+let visibilityHandler: (() => void) | null = null;
+
+/**
+ * Get elapsed time for current card, excluding time when tabbed away.
+ */
+function getElapsedTime(): number {
+  if (state.pausedAt !== null) {
+    // Currently paused, return accumulated time
+    return state.elapsedBeforePause;
+  }
+  return state.elapsedBeforePause + (performance.now() - state.startTime);
+}
+
+/**
+ * Set up visibility change handler to pause timing when tabbed away.
+ */
+function setupVisibilityHandler(): void {
+  if (visibilityHandler) {
+    document.removeEventListener("visibilitychange", visibilityHandler);
+  }
+
+  visibilityHandler = () => {
+    if (document.hidden) {
+      // Pausing - save elapsed time
+      if (state.pausedAt === null) {
+        state.elapsedBeforePause += performance.now() - state.startTime;
+        state.pausedAt = performance.now();
+      }
+    } else {
+      // Resuming - reset start time
+      if (state.pausedAt !== null) {
+        state.startTime = performance.now();
+        state.pausedAt = null;
+      }
+    }
+  };
+
+  document.addEventListener("visibilitychange", visibilityHandler);
+}
 
 function initExercise(): void {
   const memoryState = loadState();
@@ -84,7 +128,13 @@ function initExercise(): void {
     sessionTotal: 0,
     inputEnabled: false,
     isNewCard: sessionCards.newCards.includes(firstFreq),
+    startTime: performance.now(),
+    elapsedBeforePause: 0,
+    pausedAt: document.hidden ? performance.now() : null,
+    replayTimesMs: [],
   };
+
+  setupVisibilityHandler();
 }
 
 /**
@@ -187,12 +237,17 @@ function handleAnswer(answer: number): void {
 }
 
 function handleGrade(grade: Grade): void {
-  // Record the review in FSRS (include guess history for analysis)
+  // Record the review in FSRS (include timing and guess history for analysis)
+  const timeMs = Math.round(getElapsedTime());
   state.memoryState = recordReview(
     state.memoryState,
     state.currentFrequency,
     grade,
-    state.guessHistory
+    {
+      guessHistory: state.guessHistory,
+      timeMs,
+      replayTimesMs: state.replayTimesMs,
+    }
   );
   saveState(state.memoryState);
 
@@ -234,6 +289,11 @@ function advanceToNext(): void {
   state.lastFeedback = null;
   state.isNewCard = state.sessionCards.newCards.includes(nextFreq);
   state.inputEnabled = false;
+  // Reset timing for new card
+  state.startTime = performance.now();
+  state.elapsedBeforePause = 0;
+  state.pausedAt = document.hidden ? performance.now() : null;
+  state.replayTimesMs = [];
 
   render();
   playCurrentFrequency();
@@ -242,6 +302,15 @@ function advanceToNext(): void {
 async function playCurrentFrequency(): Promise<void> {
   await playFrequency(state.currentFrequency, { duration: NOTE_DURATION });
   state.inputEnabled = true;
+}
+
+/**
+ * Record a replay and play the frequency again.
+ */
+async function handleReplay(): Promise<void> {
+  // Record replay time (relative to start, excluding paused time)
+  state.replayTimesMs.push(Math.round(getElapsedTime()));
+  await playCurrentFrequency();
 }
 
 function formatFrequency(freq: number): string {
@@ -376,10 +445,14 @@ function renderSessionComplete(): void {
     playCurrentFrequency();
   });
 
-  // Clean up keyboard handler
+  // Clean up handlers
   if (keyboardHandler) {
     document.removeEventListener("keydown", keyboardHandler);
     keyboardHandler = null;
+  }
+  if (visibilityHandler) {
+    document.removeEventListener("visibilitychange", visibilityHandler);
+    visibilityHandler = null;
   }
 }
 
@@ -387,7 +460,7 @@ function setupEventListeners(): void {
   const choices = state.currentChoices;
   const playBtn = document.getElementById("play-btn");
   playBtn?.addEventListener("click", () => {
-    playCurrentFrequency();
+    handleReplay();
   });
 
   const choiceButtons = document.querySelectorAll(".freq-choice");
@@ -421,7 +494,7 @@ function setupEventListeners(): void {
 
     if (e.key === "r" || e.key === "R") {
       e.preventDefault();
-      playCurrentFrequency();
+      handleReplay();
       return;
     }
 
@@ -448,6 +521,10 @@ function setupEventListeners(): void {
     if (keyboardHandler) {
       document.removeEventListener("keydown", keyboardHandler);
       keyboardHandler = null;
+    }
+    if (visibilityHandler) {
+      document.removeEventListener("visibilitychange", visibilityHandler);
+      visibilityHandler = null;
     }
     window.removeEventListener("hashchange", cleanupOnNavigate);
   };

@@ -21,6 +21,8 @@ export interface ReviewRecord {
   grade: Grade;
   wasNew: boolean;
   guessHistory?: number[]; // Wrong guesses before correct answer (empty = first try)
+  timeMs?: number; // Time taken in ms (excluding time tabbed away)
+  replayTimesMs?: number[]; // Times replay was pressed (ms from start, excluding tabbed time)
 }
 
 export interface FrequencyCard {
@@ -478,6 +480,12 @@ export function selectSessionCards(state: FreqMemoryState): SessionCards {
   };
 }
 
+export interface ReviewData {
+  guessHistory?: number[];
+  timeMs?: number;
+  replayTimesMs?: number[];
+}
+
 /**
  * Record a review result for a frequency.
  */
@@ -485,7 +493,7 @@ export function recordReview(
   state: FreqMemoryState,
   frequency: number,
   grade: Grade,
-  guessHistory: number[] = []
+  data: ReviewData = {}
 ): FreqMemoryState {
   const now = Date.now();
   const cardIndex = state.cards.findIndex((c) => c.frequency === frequency);
@@ -520,7 +528,15 @@ export function recordReview(
     timestamp: now,
     grade,
     wasNew,
-    guessHistory: guessHistory.length > 0 ? guessHistory : undefined,
+    guessHistory:
+      data.guessHistory && data.guessHistory.length > 0
+        ? data.guessHistory
+        : undefined,
+    timeMs: data.timeMs,
+    replayTimesMs:
+      data.replayTimesMs && data.replayTimesMs.length > 0
+        ? data.replayTimesMs
+        : undefined,
   };
 
   return {
