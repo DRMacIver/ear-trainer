@@ -659,9 +659,8 @@ function setupEventListeners(): void {
       if (isPlaying) return; // Don't advance while audio is playing
       if (question.hasAnswered) {
         advanceToNext();
-      } else {
-        playBothNotes();
       }
+      // Space no longer replays - use R for that
     }
   };
 
