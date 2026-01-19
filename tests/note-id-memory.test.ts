@@ -487,10 +487,38 @@ describe("selectSessionCards", () => {
     expect(fullNoteCards.some((c) => c.note === "A4")).toBe(true);
   });
 
-  it("limits new cards per session", () => {
+  it("first session introduces 2 pairs plus octave 3 counterparts", () => {
     const state = loadState();
     const session = selectSessionCards(state);
 
+    // First session: 2 pairs (4 cards) + 2 octave 3 notes (2 cards) = 6 cards
+    expect(session.newCards.length).toBe(6);
+    expect(session.isFirstSession).toBe(true);
+
+    // Should have C4, A4 (octaveId), C, A (noteSequence), C3, A3 (octaveId)
+    const ids = session.newCards.map((c) => c.id);
+    expect(ids).toContain("octaveId:C4");
+    expect(ids).toContain("octaveId:A4");
+    expect(ids).toContain("noteSequence:C");
+    expect(ids).toContain("noteSequence:A");
+    expect(ids).toContain("octaveId:C3");
+    expect(ids).toContain("octaveId:A3");
+  });
+
+  it("limits new cards per session after first session", () => {
+    let state = loadState();
+    // Simulate first session complete
+    state = recordReview(state, "octaveId:C4", Grade.GOOD);
+    state = recordReview(state, "octaveId:A4", Grade.GOOD);
+    state = recordReview(state, "noteSequence:C", Grade.GOOD);
+    state = recordReview(state, "noteSequence:A", Grade.GOOD);
+    state = recordReview(state, "octaveId:C3", Grade.GOOD);
+    state = recordReview(state, "octaveId:A3", Grade.GOOD);
+    state = incrementSessionCount(state);
+
+    const session = selectSessionCards(state);
+
+    expect(session.isFirstSession).toBe(false);
     expect(session.newCards.length).toBeLessThanOrEqual(4);
   });
 

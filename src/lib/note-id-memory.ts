@@ -378,6 +378,7 @@ export interface SessionCards {
 
 const MAX_SESSION_CARDS = 10;
 const MAX_NEW_CARDS_PER_SESSION = 4;
+const MIN_FIRST_SESSION_PAIRS = 2; // Ensure first session has enough variety
 
 /**
  * Select cards for a session: mix of review cards and new introductions.
@@ -395,28 +396,55 @@ export function selectSessionCards(state: NoteIdMemoryState): SessionCards {
   // Determine new cards to introduce
   const newCardIds: string[] = [];
 
-  // First: try to introduce paired octaveId + noteSequence
-  const nextPair = getNextPairedIntroduction(state);
-  if (nextPair && newCardIds.length < MAX_NEW_CARDS_PER_SESSION) {
-    // Add octaveId if not introduced
-    const octaveCard = state.cards.find((c) => c.id === nextPair.octaveIdCardId);
-    if (octaveCard?.card === null) {
-      newCardIds.push(nextPair.octaveIdCardId);
-    }
-    // Add noteSequence if not introduced
-    const noteSeqCard = state.cards.find(
-      (c) => c.id === nextPair.noteSeqCardId
-    );
-    if (noteSeqCard?.card === null) {
-      newCardIds.push(nextPair.noteSeqCardId);
-    }
-  }
+  // For first session, introduce at least 2 pairs + their octave 3 counterparts
+  // This ensures octaveId has multiple octaves and noteSequence has multiple families
+  if (isFirstSession) {
+    const pairsToIntroduce: { note: string; family: string }[] = [];
 
-  // Second: try to introduce octave 3/5 octaveId cards
-  if (newCardIds.length < MAX_NEW_CARDS_PER_SESSION && !nextPair) {
-    const nextOctaveId = getNextOctaveIdIntroduction(state);
-    if (nextOctaveId) {
-      newCardIds.push(nextOctaveId);
+    // Get the first MIN_FIRST_SESSION_PAIRS pairs
+    for (const pair of PAIRED_INTRODUCTION_ORDER) {
+      if (pairsToIntroduce.length >= MIN_FIRST_SESSION_PAIRS) break;
+      pairsToIntroduce.push(pair);
+    }
+
+    // Add all the paired cards
+    for (const pair of pairsToIntroduce) {
+      newCardIds.push(`octaveId:${pair.note}`);
+      newCardIds.push(`noteSequence:${pair.family}`);
+    }
+
+    // Also add the octave 3 version of each note for octaveId variety
+    for (const pair of pairsToIntroduce) {
+      const family = pair.family;
+      const octave3Note = `${family}3`;
+      newCardIds.push(`octaveId:${octave3Note}`);
+    }
+  } else {
+    // Normal session: introduce one pair at a time
+    const nextPair = getNextPairedIntroduction(state);
+    if (nextPair && newCardIds.length < MAX_NEW_CARDS_PER_SESSION) {
+      // Add octaveId if not introduced
+      const octaveCard = state.cards.find(
+        (c) => c.id === nextPair.octaveIdCardId
+      );
+      if (octaveCard?.card === null) {
+        newCardIds.push(nextPair.octaveIdCardId);
+      }
+      // Add noteSequence if not introduced
+      const noteSeqCard = state.cards.find(
+        (c) => c.id === nextPair.noteSeqCardId
+      );
+      if (noteSeqCard?.card === null) {
+        newCardIds.push(nextPair.noteSeqCardId);
+      }
+    }
+
+    // Second: try to introduce octave 3/5 octaveId cards
+    if (newCardIds.length < MAX_NEW_CARDS_PER_SESSION && !nextPair) {
+      const nextOctaveId = getNextOctaveIdIntroduction(state);
+      if (nextOctaveId) {
+        newCardIds.push(nextOctaveId);
+      }
     }
   }
 
