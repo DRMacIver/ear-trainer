@@ -357,10 +357,16 @@ export function selectTargetNote(
   }
 
   // Pick a new target from vocabulary
-  // Bias towards notes that aren't fully familiar yet
-  const unfamiliar = newVocabulary.filter((n) => !isNoteFamiliar(state, n));
-  const candidates = unfamiliar.length > 0 ? unfamiliar : newVocabulary;
-  const newTarget = candidates[Math.floor(Math.random() * candidates.length)];
+  // If we just introduced a note, that should be the target
+  // Otherwise, bias towards notes that aren't fully familiar yet
+  let newTarget: FullTone;
+  if (introducedNote) {
+    newTarget = introducedNote;
+  } else {
+    const unfamiliar = newVocabulary.filter((n) => !isNoteFamiliar(state, n));
+    const candidates = unfamiliar.length > 0 ? unfamiliar : newVocabulary;
+    newTarget = candidates[Math.floor(Math.random() * candidates.length)];
+  }
   const newOctave = pickOctave(newTarget);
 
   // Only count as "new target" if it actually changed

@@ -551,4 +551,98 @@ describe("Note introduction triggers", () => {
     const [, , , , updatedState,] = selectTargetNote(state, mockPickOctave);
     expect(updatedState.candidateStreaks).toEqual({});
   });
+
+  it("sets target to introduced note when a new note is introduced", () => {
+    let state = loadState();
+    // Set up E as the next candidate with sufficient streaks
+    state.candidateStreaks = {
+      "C-E": 5,
+      "G-E": 5,
+    };
+    state.correctStreak = STREAK_LENGTH; // Trigger new target selection
+
+    const [target, , , , , introducedNote] = selectTargetNote(
+      state,
+      mockPickOctave
+    );
+    expect(introducedNote).toBe("E");
+    // Target should be the introduced note, not randomly selected
+    expect(target).toBe("E");
+  });
+
+  it("sets target to introduced note when introduced by time threshold", () => {
+    let state = loadState();
+    state.questionsSinceLastIntroduction = 30;
+    state.correctStreak = STREAK_LENGTH;
+
+    const [target, , , , , introducedNote] = selectTargetNote(
+      state,
+      mockPickOctave
+    );
+    expect(introducedNote).toBe("E");
+    expect(target).toBe("E");
+  });
+
+  it("does not introduce second note too quickly after first", () => {
+    let state = loadState();
+    // Introduce E first
+    state.candidateStreaks = {
+      "C-E": 5,
+      "G-E": 5,
+    };
+    state.correctStreak = STREAK_LENGTH;
+
+    const [, , , , updatedState, introducedNote] = selectTargetNote(
+      state,
+      mockPickOctave
+    );
+    expect(introducedNote).toBe("E");
+    expect(updatedState.learningVocabulary).toEqual(["C", "G", "E"]);
+    expect(updatedState.candidateStreaks).toEqual({});
+    expect(updatedState.questionsSinceLastIntroduction).toBe(0);
+
+    // Now simulate getting 3 correct on E and selecting next target
+    let state2 = { ...updatedState, correctStreak: STREAK_LENGTH };
+
+    // Next note to learn is A
+    const nextNote = getNextNoteToLearn(state2);
+    expect(nextNote).toBe("A");
+
+    // Should NOT introduce A yet - candidateStreaks is empty and
+    // questionsSinceLastIntroduction is 0
+    const [, , , , updatedState2, introducedNote2] = selectTargetNote(
+      state2,
+      mockPickOctave
+    );
+
+    expect(introducedNote2).toBeNull();
+    expect(updatedState2.learningVocabulary).toEqual(["C", "G", "E"]);
+  });
+
+  it("requires new streaks to be built for second introduction", () => {
+    let state = loadState();
+    // Start with E already introduced
+    state.learningVocabulary = ["C", "G", "E"];
+    state.candidateStreaks = {}; // Reset after E was introduced
+    state.questionsSinceLastIntroduction = 0;
+    state.correctStreak = STREAK_LENGTH;
+
+    // A is the next candidate, closest vocab notes are G (distance 1) and E (distance 3)
+    // Need streaks for G-A and E-A (or C-A depending on distance calculation)
+
+    // Without sufficient streaks, A should not be introduced
+    const [, , , , , introducedNote] = selectTargetNote(state, mockPickOctave);
+    expect(introducedNote).toBeNull();
+
+    // Now add streaks for A against its two closest notes
+    // A is between G and B in FULL_TONES. Closest in vocab are G (1) and E (3)?
+    // Let's check: distance from A to C=2, G=1, E=3. Closest are G and C.
+    state.candidateStreaks = {
+      "G-A": 5,
+      "C-A": 5,
+    };
+
+    const [, , , , , introducedNote2] = selectTargetNote(state, mockPickOctave);
+    expect(introducedNote2).toBe("A");
+  });
 });
