@@ -55,7 +55,7 @@ let shouldRepeatSwapped = false; // Whether to repeat correct answer with swappe
 let isPlaying = false; // Whether audio is currently playing
 
 const AUTO_ADVANCE_DELAY = 750; // ms
-const RETRY_CHANCE = 0.7; // 70% chance to retry after wrong answer
+const RETRY_CHANCE = 1.0; // Always retry after wrong answer until correct
 const REPEAT_CORRECT_CHANCE = 0.3; // 30% chance to repeat after correct answer
 
 /** Get allowed octaves for a note family to prevent edge identification */
