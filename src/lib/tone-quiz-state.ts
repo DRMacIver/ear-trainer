@@ -285,21 +285,25 @@ export function getRepeatProbability(state: ToneQuizState, now: number): number 
 
 /**
  * Select the most urgent pair to review based on FSRS retrievability.
+ * Only considers cards that are due (days since review >= scheduled interval).
  * Returns the pair with lowest retrievability (most likely to be forgotten).
  */
 export function selectMostUrgentPair(
   state: ToneQuizState
 ): { target: FullTone; other: FullTone } | null {
+  const now = Date.now();
   const pairs = Object.entries(state.pairCards)
     .filter(([, pc]) => pc.card !== null)
     .map(([key, pc]) => {
       const [target, other] = key.split("-") as [FullTone, FullTone];
       const days = pc.lastReviewedAt
-        ? (Date.now() - pc.lastReviewedAt) / (1000 * 60 * 60 * 24)
+        ? (now - pc.lastReviewedAt) / (1000 * 60 * 60 * 24)
         : Infinity;
       const retrievability = deck.getRetrievability(pc.card!, days);
-      return { target, other, retrievability };
-    });
+      const isDue = days >= pc.card!.I; // Due when days elapsed >= scheduled interval
+      return { target, other, retrievability, isDue };
+    })
+    .filter((p) => p.isDue); // Only consider cards that are due
 
   if (pairs.length === 0) return null;
 

@@ -852,23 +852,55 @@ describe("selectMostUrgentPair", () => {
     expect(selectMostUrgentPair(state)).toBeNull();
   });
 
-  it("returns the most urgent pair (lowest retrievability)", () => {
+  it("returns null when no cards are due yet", () => {
     let state = loadState();
     const now = Date.now();
 
-    // Create two cards - one reviewed recently, one reviewed long ago
+    // Create a card reviewed just now - not due yet
     state = recordPairReview(state, "C", "G", Grade.GOOD);
-    // Simulate the C-G card being reviewed recently
     state.pairCards["C-G"].lastReviewedAt = now;
 
+    const pair = selectMostUrgentPair(state);
+    expect(pair).toBeNull();
+  });
+
+  it("returns the most urgent due pair (lowest retrievability)", () => {
+    let state = loadState();
+    const now = Date.now();
+
+    // Create a card that's due (reviewed long ago, past its interval)
     state = recordPairReview(state, "C", "E", Grade.GOOD);
-    // Simulate the C-E card being reviewed a long time ago (more urgent)
+    // FSRS GOOD on new card gives interval ~3 days, so 7 days ago is definitely due
+    state.pairCards["C-E"].lastReviewedAt = now - 7 * 24 * 60 * 60 * 1000;
+
+    // Create another due card, reviewed even longer ago (more urgent)
+    state = recordPairReview(state, "C", "G", Grade.GOOD);
+    state.pairCards["C-G"].lastReviewedAt = now - 14 * 24 * 60 * 60 * 1000; // 14 days ago
+
+    const pair = selectMostUrgentPair(state);
+
+    expect(pair).not.toBeNull();
+    // C-G should be more urgent since it was reviewed longer ago
+    expect(pair!.target).toBe("C");
+    expect(pair!.other).toBe("G");
+  });
+
+  it("ignores cards that are not due yet", () => {
+    let state = loadState();
+    const now = Date.now();
+
+    // Create a card that's not due (reviewed recently)
+    state = recordPairReview(state, "C", "G", Grade.GOOD);
+    state.pairCards["C-G"].lastReviewedAt = now; // Just reviewed
+
+    // Create a card that IS due
+    state = recordPairReview(state, "C", "E", Grade.GOOD);
     state.pairCards["C-E"].lastReviewedAt = now - 7 * 24 * 60 * 60 * 1000; // 7 days ago
 
     const pair = selectMostUrgentPair(state);
 
     expect(pair).not.toBeNull();
-    // C-E should be more urgent since it was reviewed longer ago
+    // Only C-E should be considered since C-G isn't due
     expect(pair!.target).toBe("C");
     expect(pair!.other).toBe("E");
   });
