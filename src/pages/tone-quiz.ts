@@ -61,22 +61,43 @@ const AUTO_ADVANCE_DELAY = 750; // ms
 const RETRY_CHANCE = 1.0; // Always retry after wrong answer until correct
 const REPEAT_CORRECT_CHANCE = 0.3; // 30% chance to repeat after correct answer
 
-/** Get allowed octaves for a note family to prevent edge identification */
-function getAllowedOctaves(family: FullTone): number[] {
-  // A and B can be in octave 3 or 4
-  // C and D can be in octave 4 or 5
-  // Others are just octave 4
-  if (family === "A" || family === "B") {
-    return [3, 4];
-  } else if (family === "C" || family === "D") {
-    return [4, 5];
-  }
-  return [4];
+/** Target note is always in octave 4 */
+function pickTargetOctave(): number {
+  return 4;
 }
 
-function pickOctave(family: FullTone): number {
-  const octaves = getAllowedOctaves(family);
-  return octaves[Math.floor(Math.random() * octaves.length)];
+/**
+ * Pick octave for the "other" note based on distance from target.
+ * Uses octave 3 (for A/B) or octave 5 (for C/D) only if it keeps
+ * the note within 4 diatonic steps of the target.
+ */
+function pickOtherOctave(target: FullTone, other: FullTone): number {
+  const targetIdx = FULL_TONES.indexOf(target);
+  const otherIdx = FULL_TONES.indexOf(other);
+
+  // Pitch positions relative to C4=0, D4=1, ..., B4=6
+  // Octave 3: B3=-1, A3=-2, etc.
+  // Octave 5: C5=7, D5=8, etc.
+  const targetPitch = targetIdx;
+  const otherPitchOct4 = otherIdx;
+  const otherPitchOct3 = otherIdx - 7;
+  const otherPitchOct5 = otherIdx + 7;
+
+  const distOct4 = Math.abs(otherPitchOct4 - targetPitch);
+  const distOct3 = Math.abs(otherPitchOct3 - targetPitch);
+  const distOct5 = Math.abs(otherPitchOct5 - targetPitch);
+
+  // Use octave 3 for A/B only if it's closer AND within 4 steps
+  if ((other === "A" || other === "B") && distOct3 <= 4 && distOct3 < distOct4) {
+    return 3;
+  }
+
+  // Use octave 5 for C/D only if it's closer AND within 4 steps
+  if ((other === "C" || other === "D") && distOct5 <= 4 && distOct5 < distOct4) {
+    return 5;
+  }
+
+  return 4;
 }
 
 function initQuestion(): { isNewTarget: boolean; introducedNote: FullTone | null } {
@@ -107,8 +128,8 @@ function initQuestionFromPair(
   targetNote: FullTone,
   otherNote: FullTone
 ): { isNewTarget: boolean; introducedNote: FullTone | null } {
-  const targetOctave = pickOctave(targetNote);
-  const otherOctave = pickOctave(otherNote);
+  const targetOctave = pickTargetOctave();
+  const otherOctave = pickOtherOctave(targetNote, otherNote);
 
   const targetWithOctave = `${targetNote}${targetOctave}`;
   const otherWithOctave = `${otherNote}${otherOctave}`;
@@ -154,12 +175,12 @@ function initQuestionFromPair(
 function initQuestionNormal(): { isNewTarget: boolean; introducedNote: FullTone | null } {
   // Select target note (with stickiness - stays until 3 correct in a row)
   const [targetNote, targetOctave, isNewTarget, isFirstOnTarget, updatedState, introducedNote] =
-    selectTargetNote(persistentState, pickOctave);
+    selectTargetNote(persistentState, pickTargetOctave);
   persistentState = updatedState;
 
   // Select other note based on current learning progress
   const otherNote = selectOtherNote(persistentState, targetNote);
-  const otherOctave = pickOctave(otherNote);
+  const otherOctave = pickOtherOctave(targetNote, otherNote);
 
   const targetWithOctave = `${targetNote}${targetOctave}`;
   const otherWithOctave = `${otherNote}${otherOctave}`;
