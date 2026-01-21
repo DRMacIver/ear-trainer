@@ -15,6 +15,9 @@ import {
   selectTargetNote,
   selectOtherNote,
   updateStreak,
+  maybeStartNewSession,
+  getRepeatProbability,
+  selectMostUrgentPair,
   ToneQuizState,
   FullTone,
   FULL_TONES,
@@ -77,6 +80,78 @@ function pickOctave(family: FullTone): number {
 }
 
 function initQuestion(): { isNewTarget: boolean; introducedNote: FullTone | null } {
+  const now = Date.now();
+
+  // Maybe start new session (if inactive for more than 5 minutes)
+  persistentState = maybeStartNewSession(persistentState, now);
+
+  // Roll for repeat based on session freshness
+  const repeatProb = getRepeatProbability(persistentState, now);
+  const shouldRepeat = Math.random() < repeatProb;
+
+  if (shouldRepeat) {
+    // Try to find most urgent review card
+    const pair = selectMostUrgentPair(persistentState);
+    if (pair) {
+      // Use FSRS-selected pair
+      return initQuestionFromPair(pair.target, pair.other);
+    }
+  }
+
+  // Fall through to normal selection
+  return initQuestionNormal();
+}
+
+/** Initialize question from a specific target-other pair (FSRS repeat) */
+function initQuestionFromPair(
+  targetNote: FullTone,
+  otherNote: FullTone
+): { isNewTarget: boolean; introducedNote: FullTone | null } {
+  const targetOctave = pickOctave(targetNote);
+  const otherOctave = pickOctave(otherNote);
+
+  const targetWithOctave = `${targetNote}${targetOctave}`;
+  const otherWithOctave = `${otherNote}${otherOctave}`;
+
+  // Randomize which plays first
+  const [first, second] = randomizeOrder(
+    { note: targetWithOctave, family: targetNote },
+    { note: otherWithOctave, family: otherNote }
+  );
+
+  // Check if this is actually a new target vs current target
+  const isNewTarget = targetNote !== persistentState.currentTarget;
+
+  // Update current target state if changed
+  if (isNewTarget) {
+    persistentState = {
+      ...persistentState,
+      currentTarget: targetNote,
+      currentTargetOctave: targetOctave,
+      correctStreak: 0,
+      isFirstOnTarget: false,
+    };
+  }
+
+  question = {
+    noteA: first.note,
+    noteB: second.note,
+    familyA: first.family,
+    familyB: second.family,
+    targetNote,
+    otherNote,
+    hasAnswered: false,
+    wasCorrect: null,
+    isFirstInStreak: true, // FSRS repeats count for tracking
+    countsForStreak: true,
+    startTime: Date.now(),
+  };
+
+  return { isNewTarget, introducedNote: null };
+}
+
+/** Initialize question using normal selection (adaptive difficulty) */
+function initQuestionNormal(): { isNewTarget: boolean; introducedNote: FullTone | null } {
   // Select target note (with stickiness - stays until 3 correct in a row)
   const [targetNote, targetOctave, isNewTarget, isFirstOnTarget, updatedState, introducedNote] =
     selectTargetNote(persistentState, pickOctave);

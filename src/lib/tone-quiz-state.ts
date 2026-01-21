@@ -3,7 +3,12 @@
  * Tracks play history and learning progress for continuous play sessions.
  */
 
+import { Card, Grade, createDeck } from "./fsrs.js";
+
 const STORAGE_KEY = "tone-quiz-state";
+const deck = createDeck();
+
+export { Grade };
 
 /** Full tones (no sharps/flats) in chromatic order */
 export const FULL_TONES = ["C", "D", "E", "F", "G", "A", "B"] as const;
@@ -37,6 +42,19 @@ export interface QuestionRecord {
   timeMs?: number;
 }
 
+/** FSRS card state for a target-other pair */
+export interface TonePairCard {
+  card: Card | null; // null = never reviewed
+  lastReviewedAt: number | null;
+  reviewCount: number;
+}
+
+/** Session tracking for spaced repetition */
+export interface SessionInfo {
+  sessionStartTime: number; // When current session began
+  previousSessionEnd: number | null; // When last session ended (for gap calculation)
+}
+
 export interface ToneQuizState {
   history: QuestionRecord[];
   lastPlayedAt: number | null;
@@ -54,6 +72,10 @@ export interface ToneQuizState {
   // Candidate introduction tracking
   candidateStreaks: Record<string, number>; // "target-candidate" -> consecutive correct
   questionsSinceLastIntroduction: number;
+
+  // FSRS spaced repetition state
+  pairCards: Record<string, TonePairCard>; // "target-other" -> card state
+  session: SessionInfo;
 }
 
 function createInitialState(): ToneQuizState {
@@ -68,6 +90,11 @@ function createInitialState(): ToneQuizState {
     isFirstOnTarget: true,
     candidateStreaks: {},
     questionsSinceLastIntroduction: 0,
+    pairCards: {},
+    session: {
+      sessionStartTime: Date.now(),
+      previousSessionEnd: null,
+    },
   };
 }
 
@@ -78,9 +105,16 @@ export function loadState(): ToneQuizState {
   }
   const parsed = JSON.parse(stored) as Partial<ToneQuizState>;
   // Merge with defaults for backwards compatibility
+  const initial = createInitialState();
   return {
-    ...createInitialState(),
+    ...initial,
     ...parsed,
+    // Ensure new FSRS fields have defaults (migration from older state)
+    pairCards: parsed.pairCards ?? {},
+    session: parsed.session ?? {
+      sessionStartTime: Date.now(),
+      previousSessionEnd: parsed.lastPlayedAt ?? null,
+    },
   };
 }
 
@@ -183,6 +217,133 @@ export function getNextNoteToLearn(state: ToneQuizState): FullTone | null {
   return null;
 }
 
+// Session timeout for detecting new sessions (5 minutes)
+const SESSION_TIMEOUT = 5 * 60 * 1000;
+
+/**
+ * Check if we should start a new session based on inactivity.
+ * Returns updated state if a new session started, otherwise unchanged.
+ */
+export function maybeStartNewSession(
+  state: ToneQuizState,
+  now: number
+): ToneQuizState {
+  const lastActivity = state.lastPlayedAt ?? 0;
+  const timeSinceActivity = now - lastActivity;
+
+  if (timeSinceActivity > SESSION_TIMEOUT || !state.session?.sessionStartTime) {
+    return {
+      ...state,
+      session: {
+        sessionStartTime: now,
+        previousSessionEnd: lastActivity || null,
+      },
+    };
+  }
+
+  return state;
+}
+
+/**
+ * Calculate repeat probability based on session freshness.
+ * High when returning after a break, decays during active practice.
+ *
+ * Starting probability based on gap:
+ * - 24+ hours: 100%
+ * - 0 hours: ~50%
+ *
+ * Decay during session:
+ * - 0 min: starting probability
+ * - 5 min: 50% of starting
+ * - 15 min: 10%
+ * - Never below 10%
+ */
+export function getRepeatProbability(state: ToneQuizState, now: number): number {
+  const MIN_PROB = 0.1;
+
+  // Calculate starting probability based on gap since last session
+  const gapMs = state.session.sessionStartTime
+    ? state.session.sessionStartTime - (state.session.previousSessionEnd ?? 0)
+    : Infinity;
+  const gapHours = gapMs / (1000 * 60 * 60);
+  const startingProb = Math.min(1.0, 0.5 + gapHours / 48); // 50% at 0h, 100% at 24h+
+
+  // Decay based on session time
+  const sessionMinutes = (now - state.session.sessionStartTime) / (1000 * 60);
+
+  if (sessionMinutes <= 5) {
+    // Linear decay from starting to 50% of starting
+    return startingProb * (1 - 0.5 * (sessionMinutes / 5));
+  }
+  if (sessionMinutes <= 15) {
+    // Linear decay from 50% of starting to 10%
+    const midPoint = startingProb * 0.5;
+    return midPoint - (midPoint - MIN_PROB) * ((sessionMinutes - 5) / 10);
+  }
+  return MIN_PROB;
+}
+
+/**
+ * Select the most urgent pair to review based on FSRS retrievability.
+ * Returns the pair with lowest retrievability (most likely to be forgotten).
+ */
+export function selectMostUrgentPair(
+  state: ToneQuizState
+): { target: FullTone; other: FullTone } | null {
+  const pairs = Object.entries(state.pairCards)
+    .filter(([, pc]) => pc.card !== null)
+    .map(([key, pc]) => {
+      const [target, other] = key.split("-") as [FullTone, FullTone];
+      const days = pc.lastReviewedAt
+        ? (Date.now() - pc.lastReviewedAt) / (1000 * 60 * 60 * 24)
+        : Infinity;
+      const retrievability = deck.getRetrievability(pc.card!, days);
+      return { target, other, retrievability };
+    });
+
+  if (pairs.length === 0) return null;
+
+  // Sort by retrievability (lowest = most urgent)
+  pairs.sort((a, b) => a.retrievability - b.retrievability);
+  return { target: pairs[0].target, other: pairs[0].other };
+}
+
+/**
+ * Record a review for a target-other pair in FSRS.
+ */
+export function recordPairReview(
+  state: ToneQuizState,
+  target: FullTone,
+  other: FullTone,
+  grade: Grade
+): ToneQuizState {
+  const key = `${target}-${other}`;
+  const now = Date.now();
+  const existing = state.pairCards[key];
+
+  let newCard: Card;
+  if (!existing?.card) {
+    newCard = deck.newCard(grade);
+  } else {
+    const days = existing.lastReviewedAt
+      ? (now - existing.lastReviewedAt) / (1000 * 60 * 60 * 24)
+      : 0;
+    newCard = deck.gradeCard(existing.card, days, grade);
+  }
+
+  return {
+    ...state,
+    pairCards: {
+      ...state.pairCards,
+      [key]: {
+        card: newCard,
+        lastReviewedAt: now,
+        reviewCount: (existing?.reviewCount ?? 0) + 1,
+      },
+    },
+  };
+}
+
 /**
  * Record a question result and update learning state.
  */
@@ -190,7 +351,7 @@ export function recordQuestion(
   state: ToneQuizState,
   record: QuestionRecord
 ): ToneQuizState {
-  const newState = {
+  let newState: ToneQuizState = {
     ...state,
     history: [...state.history, record],
     lastPlayedAt: record.timestamp,
@@ -198,7 +359,7 @@ export function recordQuestion(
     candidateStreaks: { ...state.candidateStreaks },
   };
 
-  // Only update performance if this was first in streak
+  // Only update performance and FSRS state if this was first in streak
   if (record.wasFirstInStreak) {
     const target = record.targetNote as FullTone;
     const other = record.otherNote as FullTone;
@@ -225,6 +386,10 @@ export function recordQuestion(
         newState.candidateStreaks[key] = 0;
       }
     }
+
+    // Update FSRS state for this pair
+    const grade = record.correct ? Grade.GOOD : Grade.AGAIN;
+    newState = recordPairReview(newState, target, other, grade);
   }
 
   return newState;

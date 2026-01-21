@@ -15,6 +15,11 @@ import {
   getNextNoteToLearn,
   getClosestVocabularyNotes,
   isCandidateReadyByStreak,
+  maybeStartNewSession,
+  getRepeatProbability,
+  recordPairReview,
+  selectMostUrgentPair,
+  Grade,
   FullTone,
   FULL_TONES,
   LEARNING_ORDER,
@@ -644,5 +649,316 @@ describe("Note introduction triggers", () => {
 
     const [, , , , , introducedNote2] = selectTargetNote(state, mockPickOctave);
     expect(introducedNote2).toBe("A");
+  });
+});
+
+describe("maybeStartNewSession", () => {
+  beforeEach(() => {
+    localStorageMock.clear();
+  });
+
+  it("starts a new session when no session exists", () => {
+    let state = loadState();
+    // Remove session to simulate old state
+    state.session = undefined as unknown as typeof state.session;
+
+    const now = Date.now();
+    const updated = maybeStartNewSession(state, now);
+
+    expect(updated.session.sessionStartTime).toBe(now);
+    expect(updated.session.previousSessionEnd).toBeNull();
+  });
+
+  it("starts a new session after timeout (5+ minutes of inactivity)", () => {
+    let state = loadState();
+    const now = Date.now();
+    state.lastPlayedAt = now - 6 * 60 * 1000; // 6 minutes ago
+    state.session = {
+      sessionStartTime: now - 10 * 60 * 1000, // Old session
+      previousSessionEnd: null,
+    };
+
+    const updated = maybeStartNewSession(state, now);
+
+    expect(updated.session.sessionStartTime).toBe(now);
+    expect(updated.session.previousSessionEnd).toBe(state.lastPlayedAt);
+  });
+
+  it("does not start new session within timeout", () => {
+    let state = loadState();
+    const now = Date.now();
+    state.lastPlayedAt = now - 2 * 60 * 1000; // 2 minutes ago
+    state.session = {
+      sessionStartTime: now - 5 * 60 * 1000,
+      previousSessionEnd: null,
+    };
+
+    const updated = maybeStartNewSession(state, now);
+
+    // Session should remain unchanged
+    expect(updated.session.sessionStartTime).toBe(state.session.sessionStartTime);
+  });
+});
+
+describe("getRepeatProbability", () => {
+  beforeEach(() => {
+    localStorageMock.clear();
+  });
+
+  it("returns ~50% for immediate return (0 hour gap)", () => {
+    let state = loadState();
+    const now = Date.now();
+    state.session = {
+      sessionStartTime: now,
+      previousSessionEnd: now, // No gap
+    };
+
+    const prob = getRepeatProbability(state, now);
+    expect(prob).toBeCloseTo(0.5, 1);
+  });
+
+  it("returns 100% for 24+ hour gap", () => {
+    let state = loadState();
+    const now = Date.now();
+    state.session = {
+      sessionStartTime: now,
+      previousSessionEnd: now - 24 * 60 * 60 * 1000, // 24 hours ago
+    };
+
+    const prob = getRepeatProbability(state, now);
+    expect(prob).toBe(1.0);
+  });
+
+  it("returns ~75% for 12 hour gap", () => {
+    let state = loadState();
+    const now = Date.now();
+    state.session = {
+      sessionStartTime: now,
+      previousSessionEnd: now - 12 * 60 * 60 * 1000, // 12 hours ago
+    };
+
+    const prob = getRepeatProbability(state, now);
+    expect(prob).toBeCloseTo(0.75, 1);
+  });
+
+  it("decays to 50% of starting after 5 minutes of session time", () => {
+    let state = loadState();
+    const now = Date.now();
+    const sessionStart = now - 5 * 60 * 1000; // 5 minutes ago
+    state.session = {
+      sessionStartTime: sessionStart,
+      previousSessionEnd: sessionStart - 24 * 60 * 60 * 1000, // 24h gap
+    };
+
+    const prob = getRepeatProbability(state, now);
+    // Started at 100%, should be 50% after 5 minutes
+    expect(prob).toBeCloseTo(0.5, 1);
+  });
+
+  it("decays to 10% after 15+ minutes of session time", () => {
+    let state = loadState();
+    const now = Date.now();
+    const sessionStart = now - 20 * 60 * 1000; // 20 minutes ago
+    state.session = {
+      sessionStartTime: sessionStart,
+      previousSessionEnd: sessionStart - 24 * 60 * 60 * 1000,
+    };
+
+    const prob = getRepeatProbability(state, now);
+    expect(prob).toBe(0.1);
+  });
+
+  it("never goes below 10%", () => {
+    let state = loadState();
+    const now = Date.now();
+    const sessionStart = now - 60 * 60 * 1000; // 1 hour into session
+    state.session = {
+      sessionStartTime: sessionStart,
+      previousSessionEnd: sessionStart,
+    };
+
+    const prob = getRepeatProbability(state, now);
+    expect(prob).toBe(0.1);
+  });
+});
+
+describe("recordPairReview", () => {
+  beforeEach(() => {
+    localStorageMock.clear();
+  });
+
+  it("creates a new card for first review", () => {
+    let state = loadState();
+    expect(state.pairCards["C-G"]).toBeUndefined();
+
+    state = recordPairReview(state, "C", "G", Grade.GOOD);
+
+    expect(state.pairCards["C-G"]).toBeDefined();
+    expect(state.pairCards["C-G"].card).not.toBeNull();
+    expect(state.pairCards["C-G"].reviewCount).toBe(1);
+    expect(state.pairCards["C-G"].lastReviewedAt).toBeDefined();
+  });
+
+  it("updates existing card on subsequent reviews", () => {
+    let state = loadState();
+    state = recordPairReview(state, "C", "G", Grade.GOOD);
+    const firstCard = state.pairCards["C-G"].card;
+
+    state = recordPairReview(state, "C", "G", Grade.GOOD);
+
+    expect(state.pairCards["C-G"].reviewCount).toBe(2);
+    // Card should be updated (stability should increase for correct answers)
+    expect(state.pairCards["C-G"].card).not.toBe(firstCard);
+  });
+
+  it("handles AGAIN grade correctly", () => {
+    let state = loadState();
+    state = recordPairReview(state, "C", "G", Grade.AGAIN);
+
+    expect(state.pairCards["C-G"]).toBeDefined();
+    expect(state.pairCards["C-G"].card).not.toBeNull();
+    // Card with AGAIN grade should have lower stability
+    expect(state.pairCards["C-G"].card!.S).toBeLessThan(1);
+  });
+
+  it("tracks different pairs separately", () => {
+    let state = loadState();
+    state = recordPairReview(state, "C", "G", Grade.GOOD);
+    state = recordPairReview(state, "G", "C", Grade.GOOD);
+    state = recordPairReview(state, "C", "E", Grade.AGAIN);
+
+    expect(Object.keys(state.pairCards)).toHaveLength(3);
+    expect(state.pairCards["C-G"].reviewCount).toBe(1);
+    expect(state.pairCards["G-C"].reviewCount).toBe(1);
+    expect(state.pairCards["C-E"].reviewCount).toBe(1);
+  });
+});
+
+describe("selectMostUrgentPair", () => {
+  beforeEach(() => {
+    localStorageMock.clear();
+  });
+
+  it("returns null when no cards exist", () => {
+    const state = loadState();
+    expect(selectMostUrgentPair(state)).toBeNull();
+  });
+
+  it("returns null when all cards are null", () => {
+    let state = loadState();
+    state.pairCards = {
+      "C-G": { card: null, lastReviewedAt: null, reviewCount: 0 },
+    };
+    expect(selectMostUrgentPair(state)).toBeNull();
+  });
+
+  it("returns the most urgent pair (lowest retrievability)", () => {
+    let state = loadState();
+    const now = Date.now();
+
+    // Create two cards - one reviewed recently, one reviewed long ago
+    state = recordPairReview(state, "C", "G", Grade.GOOD);
+    // Simulate the C-G card being reviewed recently
+    state.pairCards["C-G"].lastReviewedAt = now;
+
+    state = recordPairReview(state, "C", "E", Grade.GOOD);
+    // Simulate the C-E card being reviewed a long time ago (more urgent)
+    state.pairCards["C-E"].lastReviewedAt = now - 7 * 24 * 60 * 60 * 1000; // 7 days ago
+
+    const pair = selectMostUrgentPair(state);
+
+    expect(pair).not.toBeNull();
+    // C-E should be more urgent since it was reviewed longer ago
+    expect(pair!.target).toBe("C");
+    expect(pair!.other).toBe("E");
+  });
+});
+
+describe("recordQuestion updates FSRS state", () => {
+  beforeEach(() => {
+    localStorageMock.clear();
+  });
+
+  it("creates FSRS card for first-in-streak questions", () => {
+    let state = loadState();
+
+    state = recordQuestion(state, {
+      timestamp: Date.now(),
+      noteA: "C4",
+      noteB: "G4",
+      targetNote: "C",
+      otherNote: "G",
+      correct: true,
+      wasFirstInStreak: true,
+    });
+
+    expect(state.pairCards["C-G"]).toBeDefined();
+    expect(state.pairCards["C-G"].card).not.toBeNull();
+    expect(state.pairCards["C-G"].reviewCount).toBe(1);
+  });
+
+  it("does not create FSRS card for retry questions", () => {
+    let state = loadState();
+
+    state = recordQuestion(state, {
+      timestamp: Date.now(),
+      noteA: "C4",
+      noteB: "G4",
+      targetNote: "C",
+      otherNote: "G",
+      correct: true,
+      wasFirstInStreak: false,
+    });
+
+    expect(state.pairCards["C-G"]).toBeUndefined();
+  });
+
+  it("uses AGAIN grade for incorrect answers", () => {
+    let state = loadState();
+
+    state = recordQuestion(state, {
+      timestamp: Date.now(),
+      noteA: "C4",
+      noteB: "G4",
+      targetNote: "C",
+      otherNote: "G",
+      correct: false,
+      wasFirstInStreak: true,
+    });
+
+    expect(state.pairCards["C-G"]).toBeDefined();
+    // AGAIN grade results in low stability
+    expect(state.pairCards["C-G"].card!.S).toBeLessThan(1);
+  });
+});
+
+describe("loadState migration", () => {
+  beforeEach(() => {
+    localStorageMock.clear();
+  });
+
+  it("adds default pairCards and session for old state", () => {
+    // Simulate old state without pairCards or session
+    const oldState = {
+      history: [],
+      lastPlayedAt: Date.now() - 60000,
+      learningVocabulary: ["C", "G", "E"],
+      performance: {},
+      currentTarget: "E",
+      currentTargetOctave: 4,
+      correctStreak: 2,
+      isFirstOnTarget: false,
+      candidateStreaks: {},
+      questionsSinceLastIntroduction: 5,
+    };
+    localStorageMock.setItem("tone-quiz-state", JSON.stringify(oldState));
+
+    const loaded = loadState();
+
+    expect(loaded.pairCards).toEqual({});
+    expect(loaded.session).toBeDefined();
+    expect(loaded.session.sessionStartTime).toBeDefined();
+    // previousSessionEnd should be set to lastPlayedAt for migration
+    expect(loaded.session.previousSessionEnd).toBe(oldState.lastPlayedAt);
   });
 });
