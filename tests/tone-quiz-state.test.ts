@@ -526,8 +526,31 @@ describe("Note introduction triggers", () => {
 
   const mockPickOctave = () => 4;
 
+  // Helper to set up state where C and G are ready for single-note questions
+  // and familiar with single-note identification
+  function setupSingleNoteReady(state: ReturnType<typeof loadState>) {
+    // C and G are familiar with adjacent notes (ready for single-note)
+    state.performance = {
+      C: {
+        B: [true, true, true, true],
+        D: [true, true, true, true],
+      },
+      G: {
+        F: [true, true, true, true],
+        A: [true, true, true, true],
+      },
+    };
+    // Single-note is also familiar
+    state.singleNotePerformance = {
+      C: { G: [true, true, true, true] },
+      G: { C: [true, true, true, true] },
+    };
+    return state;
+  }
+
   it("introduces note when streak threshold is met", () => {
     let state = loadState();
+    setupSingleNoteReady(state);
     // Set up E as the next candidate with sufficient streaks
     state.candidateStreaks = {
       "C-E": 5,
@@ -541,6 +564,7 @@ describe("Note introduction triggers", () => {
 
   it("introduces note after MAX_QUESTIONS_WITHOUT_INTRODUCTION", () => {
     let state = loadState();
+    setupSingleNoteReady(state);
     state.questionsSinceLastIntroduction = 30;
     state.correctStreak = STREAK_LENGTH; // Trigger new target selection
 
@@ -554,6 +578,7 @@ describe("Note introduction triggers", () => {
 
   it("resets candidate streaks when note is introduced", () => {
     let state = loadState();
+    setupSingleNoteReady(state);
     state.candidateStreaks = {
       "C-E": 5,
       "G-E": 5,
@@ -566,6 +591,7 @@ describe("Note introduction triggers", () => {
 
   it("sets target to introduced note when a new note is introduced", () => {
     let state = loadState();
+    setupSingleNoteReady(state);
     // Set up E as the next candidate with sufficient streaks
     state.candidateStreaks = {
       "C-E": 5,
@@ -584,6 +610,7 @@ describe("Note introduction triggers", () => {
 
   it("sets target to introduced note when introduced by time threshold", () => {
     let state = loadState();
+    setupSingleNoteReady(state);
     state.questionsSinceLastIntroduction = 30;
     state.correctStreak = STREAK_LENGTH;
 
@@ -597,6 +624,7 @@ describe("Note introduction triggers", () => {
 
   it("does not introduce second note too quickly after first", () => {
     let state = loadState();
+    setupSingleNoteReady(state);
     // Introduce E first
     state.candidateStreaks = {
       "C-E": 5,
@@ -620,8 +648,8 @@ describe("Note introduction triggers", () => {
     const nextNote = getNextNoteToLearn(state2);
     expect(nextNote).toBe("A");
 
-    // Should NOT introduce A yet - candidateStreaks is empty and
-    // questionsSinceLastIntroduction is 0
+    // Should NOT introduce A yet - candidateStreaks is empty,
+    // questionsSinceLastIntroduction is 0, and E isn't familiar with adjacent yet
     const [, , , , updatedState2, introducedNote2] = selectTargetNote(
       state2,
       mockPickOctave
@@ -638,6 +666,17 @@ describe("Note introduction triggers", () => {
     state.candidateStreaks = {}; // Reset after E was introduced
     state.questionsSinceLastIntroduction = 0;
     state.correctStreak = STREAK_LENGTH;
+    // Set up all three notes as ready and familiar for single-note
+    state.performance = {
+      C: { B: [true, true, true, true], D: [true, true, true, true] },
+      G: { F: [true, true, true, true], A: [true, true, true, true] },
+      E: { D: [true, true, true, true], F: [true, true, true, true] },
+    };
+    state.singleNotePerformance = {
+      C: { G: [true, true, true, true], E: [true, true, true, true] },
+      G: { C: [true, true, true, true], E: [true, true, true, true] },
+      E: { C: [true, true, true, true], G: [true, true, true, true] },
+    };
 
     // A is the next candidate, closest vocab notes are G (distance 1) and E (distance 3)
     // Need streaks for G-A and E-A (or C-A depending on distance calculation)
@@ -647,8 +686,7 @@ describe("Note introduction triggers", () => {
     expect(introducedNote).toBeNull();
 
     // Now add streaks for A against its two closest notes
-    // A is between G and B in FULL_TONES. Closest in vocab are G (1) and E (3)?
-    // Let's check: distance from A to C=2, G=1, E=3. Closest are G and C.
+    // A is between G and B in FULL_TONES. Closest in vocab are G (1) and C (2).
     state.candidateStreaks = {
       "G-A": 5,
       "C-A": 5,
@@ -1144,9 +1182,10 @@ describe("Single-note question functions", () => {
   });
 
   describe("areAllVocabSingleNotesFamiliar", () => {
-    it("returns true when no pairs are ready (early game)", () => {
+    it("returns false when vocab has 2+ notes but no pairs are ready", () => {
       const state = loadState();
-      expect(areAllVocabSingleNotesFamiliar(state)).toBe(true);
+      // Default vocab is ["C", "G"] but neither is familiar with adjacent
+      expect(areAllVocabSingleNotesFamiliar(state)).toBe(false);
     });
 
     it("returns false when ready pairs are not familiar", () => {
@@ -1263,6 +1302,21 @@ describe("Note introduction gates on single-note familiarity", () => {
   });
 
   const mockPickOctave = () => 4;
+
+  it("does not introduce note when notes not yet familiar with adjacent", () => {
+    let state = loadState();
+    state.learningVocabulary = ["C", "G"];
+    // Set up E as ready by streak
+    state.candidateStreaks = {
+      "C-E": 5,
+      "G-E": 5,
+    };
+    state.correctStreak = STREAK_LENGTH;
+    // No performance data - notes not yet familiar with adjacent
+
+    const [, , , , , introducedNote] = selectTargetNote(state, mockPickOctave);
+    expect(introducedNote).toBeNull();
+  });
 
   it("does not introduce note when single-note pairs are not familiar", () => {
     let state = loadState();

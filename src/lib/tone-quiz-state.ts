@@ -289,10 +289,14 @@ export function getReadySingleNotePairs(
  * Used to gate introduction of new notes.
  */
 export function areAllVocabSingleNotesFamiliar(state: ToneQuizState): boolean {
+  const vocab = state.learningVocabulary;
   const readyPairs = getReadySingleNotePairs(state);
 
-  // If no pairs are ready yet, allow introduction (early game)
-  if (readyPairs.length === 0) return true;
+  // If vocabulary has 2+ notes, at least one pair must be ready for
+  // single-note questions before we can introduce more notes
+  if (vocab.length >= 2 && readyPairs.length === 0) {
+    return false;
+  }
 
   // Check if all ready pairs are familiar
   return readyPairs.every(([a, b]) => isSingleNotePairFamiliar(state, a, b));
