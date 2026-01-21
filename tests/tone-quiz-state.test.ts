@@ -11,6 +11,8 @@ import {
   isFamiliarWith,
   isNoteFamiliar,
   getAdjacentNotes,
+  getAdjacentNotesInVocabulary,
+  getAdjacentVocabPairs,
   getNoteDistance,
   getNextNoteToLearn,
   getClosestVocabularyNotes,
@@ -126,6 +128,86 @@ describe("getAdjacentNotes", () => {
     const [lower, upper] = getAdjacentNotes("B");
     expect(lower).toBe("A");
     expect(upper).toBe("C");
+  });
+});
+
+describe("getAdjacentNotesInVocabulary", () => {
+  it("returns null for both when note not in vocabulary", () => {
+    const [lower, upper] = getAdjacentNotesInVocabulary("D", ["C", "G"]);
+    expect(lower).toBeNull();
+    expect(upper).toBeNull();
+  });
+
+  it("returns null for both when vocabulary has only one note", () => {
+    const [lower, upper] = getAdjacentNotesInVocabulary("C", ["C"]);
+    expect(lower).toBeNull();
+    expect(upper).toBeNull();
+  });
+
+  it("returns same note for both when vocabulary has two notes", () => {
+    // With ["C", "G"], C's only neighbor is G in both directions
+    const [lower, upper] = getAdjacentNotesInVocabulary("C", ["C", "G"]);
+    expect(lower).toBe("G");
+    expect(upper).toBe("G");
+  });
+
+  it("returns different neighbors for three-note vocabulary", () => {
+    // With ["C", "G", "E"], C's neighbors are E (up) and G (down via wrap)
+    // FULL_TONES order: C D E F G A B
+    // From C: up -> D, E (E is in vocab), down -> B, A, G (G is in vocab)
+    const [lower, upper] = getAdjacentNotesInVocabulary("C", ["C", "G", "E"]);
+    expect(lower).toBe("G"); // Going down from C, G is closest in vocab
+    expect(upper).toBe("E"); // Going up from C, E is closest in vocab
+  });
+
+  it("handles note in the middle of vocabulary", () => {
+    // With ["C", "D", "E"], D's neighbors are C (down) and E (up)
+    const [lower, upper] = getAdjacentNotesInVocabulary("D", ["C", "D", "E"]);
+    expect(lower).toBe("C");
+    expect(upper).toBe("E");
+  });
+
+  it("handles wrapping correctly for G in [C, G, E]", () => {
+    // From G: up -> A, B, C (C is in vocab), down -> F, E (E is in vocab)
+    const [lower, upper] = getAdjacentNotesInVocabulary("G", ["C", "G", "E"]);
+    expect(lower).toBe("E"); // Going down from G
+    expect(upper).toBe("C"); // Going up from G (wraps to C)
+  });
+});
+
+describe("getAdjacentVocabPairs", () => {
+  it("returns empty array for single-note vocabulary", () => {
+    const pairs = getAdjacentVocabPairs(["C"]);
+    expect(pairs).toEqual([]);
+  });
+
+  it("returns single pair for two-note vocabulary", () => {
+    const pairs = getAdjacentVocabPairs(["C", "G"]);
+    expect(pairs.length).toBe(1);
+    // The pair should contain C and G
+    expect(pairs[0].sort()).toEqual(["C", "G"]);
+  });
+
+  it("returns all adjacent pairs for three-note vocabulary", () => {
+    // For ["C", "G", "E"]:
+    // C's neighbors: G (down), E (up) -> pairs [C,G], [C,E]
+    // G's neighbors: E (down), C (up) -> pairs [G,E], [G,C] (C already seen)
+    // E's neighbors: C (down), G (up) -> pairs [E,C], [E,G] (both already seen)
+    const pairs = getAdjacentVocabPairs(["C", "G", "E"]);
+    // Should have 3 unique pairs
+    expect(pairs.length).toBe(3);
+
+    const pairStrings = pairs.map(([a, b]) => [a, b].sort().join("-")).sort();
+    expect(pairStrings).toEqual(["C-E", "C-G", "E-G"]);
+  });
+
+  it("identifies adjacent pairs in larger vocabulary", () => {
+    // For ["C", "D", "G"]:
+    // C's neighbors: G (down via wrap), D (up)
+    // D's neighbors: C (down), G (up, skipping E/F)
+    // G's neighbors: D (down, skipping F/E), C (up via wrap)
+    const pairs = getAdjacentVocabPairs(["C", "D", "G"]);
+    expect(pairs.length).toBe(3);
   });
 });
 
@@ -527,9 +609,10 @@ describe("Note introduction triggers", () => {
   const mockPickOctave = () => 4;
 
   // Helper to set up state where C and G are ready for single-note questions
-  // and familiar with single-note identification
+  // and familiar with single-note identification (vocab neighbors)
   function setupSingleNoteReady(state: ReturnType<typeof loadState>) {
-    // C and G are familiar with adjacent notes (ready for single-note)
+    // C and G need to be familiar with chromatic neighbors to be "ready"
+    // for single-note questions (this gates when we ASK single-note questions)
     state.performance = {
       C: {
         B: [true, true, true, true],
@@ -540,7 +623,8 @@ describe("Note introduction triggers", () => {
         A: [true, true, true, true],
       },
     };
-    // Single-note is also familiar
+    // Single-note familiarity with vocab neighbors gates NOTE INTRODUCTION
+    // For vocab ["C", "G"], C's vocab neighbor is G and vice versa
     state.singleNotePerformance = {
       C: { G: [true, true, true, true] },
       G: { C: [true, true, true, true] },
@@ -1182,45 +1266,71 @@ describe("Single-note question functions", () => {
   });
 
   describe("areAllVocabSingleNotesFamiliar", () => {
-    it("returns false when vocab has 2+ notes but no pairs are ready", () => {
-      const state = loadState();
-      // Default vocab is ["C", "G"] but neither is familiar with adjacent
+    it("returns true for single-note vocabulary", () => {
+      let state = loadState();
+      state.learningVocabulary = ["C"];
+      expect(areAllVocabSingleNotesFamiliar(state)).toBe(true);
+    });
+
+    it("returns false when vocab neighbor pair is not single-note familiar", () => {
+      let state = loadState();
+      state.learningVocabulary = ["C", "G"];
+      // C's vocab neighbor is G, G's vocab neighbor is C
+      // No single-note performance data, so not familiar
       expect(areAllVocabSingleNotesFamiliar(state)).toBe(false);
     });
 
-    it("returns false when ready pairs are not familiar", () => {
+    it("returns true when vocab neighbor pairs are single-note familiar", () => {
       let state = loadState();
       state.learningVocabulary = ["C", "G"];
-      state.performance = {
-        C: {
-          B: [true, true, true, true],
-          D: [true, true, true, true],
-        },
-        G: {
-          F: [true, true, true, true],
-          A: [true, true, true, true],
-        },
-      };
-      // Pair is ready but not familiar in single-note mode
-      expect(areAllVocabSingleNotesFamiliar(state)).toBe(false);
-    });
-
-    it("returns true when all ready pairs are familiar", () => {
-      let state = loadState();
-      state.learningVocabulary = ["C", "G"];
-      state.performance = {
-        C: {
-          B: [true, true, true, true],
-          D: [true, true, true, true],
-        },
-        G: {
-          F: [true, true, true, true],
-          A: [true, true, true, true],
-        },
-      };
+      // C's vocab neighbor is G, need C-G and G-C single-note familiar
       state.singleNotePerformance = {
         C: { G: [true, true, true, true] },
         G: { C: [true, true, true, true] },
+      };
+      expect(areAllVocabSingleNotesFamiliar(state)).toBe(true);
+    });
+
+    it("returns false when only one direction is familiar", () => {
+      let state = loadState();
+      state.learningVocabulary = ["C", "G"];
+      state.singleNotePerformance = {
+        C: { G: [true, true, true, true] },
+        // G -> C is missing
+      };
+      expect(areAllVocabSingleNotesFamiliar(state)).toBe(false);
+    });
+
+    it("checks all vocab neighbors in larger vocabulary", () => {
+      let state = loadState();
+      state.learningVocabulary = ["C", "G", "E"];
+      // For three notes, each has two neighbors:
+      // C: neighbors are G (down) and E (up)
+      // G: neighbors are E (down) and C (up)
+      // E: neighbors are C (down) and G (up)
+      // So we need C-G, C-E, G-C, G-E, E-C, E-G all familiar
+
+      // Only C-G familiar, not others
+      state.singleNotePerformance = {
+        C: { G: [true, true, true, true] },
+        G: { C: [true, true, true, true] },
+      };
+      expect(areAllVocabSingleNotesFamiliar(state)).toBe(false);
+
+      // Add all pairs
+      state.singleNotePerformance = {
+        C: {
+          G: [true, true, true, true],
+          E: [true, true, true, true],
+        },
+        G: {
+          C: [true, true, true, true],
+          E: [true, true, true, true],
+        },
+        E: {
+          C: [true, true, true, true],
+          G: [true, true, true, true],
+        },
       };
       expect(areAllVocabSingleNotesFamiliar(state)).toBe(true);
     });
@@ -1249,6 +1359,47 @@ describe("Single-note question functions", () => {
       expect(pair).not.toBeNull();
       expect(pair!.noteA).toBe("C");
       expect(pair!.noteB).toBe("G");
+    });
+
+    it("prioritizes unfamiliar adjacent pairs", () => {
+      let state = loadState();
+      // Larger vocab with multiple pairs
+      state.learningVocabulary = ["C", "D", "G"];
+      // All notes ready for single-note questions
+      state.performance = {
+        C: {
+          B: [true, true, true, true],
+          D: [true, true, true, true],
+        },
+        D: {
+          C: [true, true, true, true],
+          E: [true, true, true, true],
+        },
+        G: {
+          F: [true, true, true, true],
+          A: [true, true, true, true],
+        },
+      };
+      // C-G is already familiar, but C-D (adjacent) is not
+      state.singleNotePerformance = {
+        C: { G: [true, true, true, true] },
+        G: { C: [true, true, true, true] },
+      };
+
+      // Should prefer C-D or D-G (adjacent and unfamiliar) over C-G
+      const results = new Set<string>();
+      for (let i = 0; i < 50; i++) {
+        const pair = selectSingleNotePair(state);
+        if (pair) {
+          results.add([pair.noteA, pair.noteB].sort().join("-"));
+        }
+      }
+
+      // Should never select C-G since it's already familiar
+      // and there are unfamiliar adjacent pairs available
+      expect(results.has("C-G")).toBe(false);
+      // Should select C-D and/or D-G (adjacent unfamiliar pairs)
+      expect(results.has("C-D") || results.has("D-G")).toBe(true);
     });
   });
 });
@@ -1303,7 +1454,7 @@ describe("Note introduction gates on single-note familiarity", () => {
 
   const mockPickOctave = () => 4;
 
-  it("does not introduce note when notes not yet familiar with adjacent", () => {
+  it("does not introduce note when vocab neighbors not single-note familiar", () => {
     let state = loadState();
     state.learningVocabulary = ["C", "G"];
     // Set up E as ready by streak
@@ -1312,39 +1463,13 @@ describe("Note introduction gates on single-note familiarity", () => {
       "G-E": 5,
     };
     state.correctStreak = STREAK_LENGTH;
-    // No performance data - notes not yet familiar with adjacent
+    // No single-note performance data - vocab neighbors not familiar
 
     const [, , , , , introducedNote] = selectTargetNote(state, mockPickOctave);
     expect(introducedNote).toBeNull();
   });
 
-  it("does not introduce note when single-note pairs are not familiar", () => {
-    let state = loadState();
-    state.learningVocabulary = ["C", "G"];
-    // Set up E as ready by streak
-    state.candidateStreaks = {
-      "C-E": 5,
-      "G-E": 5,
-    };
-    state.correctStreak = STREAK_LENGTH;
-    // C and G are familiar with adjacent notes (ready for single-note)
-    state.performance = {
-      C: {
-        B: [true, true, true, true],
-        D: [true, true, true, true],
-      },
-      G: {
-        F: [true, true, true, true],
-        A: [true, true, true, true],
-      },
-    };
-    // But single-note performance is not yet familiar
-
-    const [, , , , , introducedNote] = selectTargetNote(state, mockPickOctave);
-    expect(introducedNote).toBeNull();
-  });
-
-  it("introduces note when single-note pairs are familiar", () => {
+  it("does not introduce note when only one direction is familiar", () => {
     let state = loadState();
     state.learningVocabulary = ["C", "G"];
     state.candidateStreaks = {
@@ -1352,17 +1477,24 @@ describe("Note introduction gates on single-note familiarity", () => {
       "G-E": 5,
     };
     state.correctStreak = STREAK_LENGTH;
-    state.performance = {
-      C: {
-        B: [true, true, true, true],
-        D: [true, true, true, true],
-      },
-      G: {
-        F: [true, true, true, true],
-        A: [true, true, true, true],
-      },
+    // Only C -> G is familiar, not G -> C
+    state.singleNotePerformance = {
+      C: { G: [true, true, true, true] },
     };
-    // Single-note is also familiar
+
+    const [, , , , , introducedNote] = selectTargetNote(state, mockPickOctave);
+    expect(introducedNote).toBeNull();
+  });
+
+  it("introduces note when vocab neighbor pair is single-note familiar", () => {
+    let state = loadState();
+    state.learningVocabulary = ["C", "G"];
+    state.candidateStreaks = {
+      "C-E": 5,
+      "G-E": 5,
+    };
+    state.correctStreak = STREAK_LENGTH;
+    // C and G are single-note familiar with each other (vocab neighbors)
     state.singleNotePerformance = {
       C: { G: [true, true, true, true] },
       G: { C: [true, true, true, true] },
@@ -1370,5 +1502,43 @@ describe("Note introduction gates on single-note familiarity", () => {
 
     const [, , , , , introducedNote] = selectTargetNote(state, mockPickOctave);
     expect(introducedNote).toBe("E");
+  });
+
+  it("gates on all vocab neighbor pairs for larger vocabulary", () => {
+    let state = loadState();
+    state.learningVocabulary = ["C", "G", "E"];
+    state.candidateStreaks = {
+      "C-A": 5,
+      "G-A": 5,
+    };
+    state.correctStreak = STREAK_LENGTH;
+
+    // Only C-G familiar, but E also has neighbors
+    state.singleNotePerformance = {
+      C: { G: [true, true, true, true] },
+      G: { C: [true, true, true, true] },
+    };
+
+    const [, , , , , introducedNote] = selectTargetNote(state, mockPickOctave);
+    expect(introducedNote).toBeNull(); // E's neighbors not familiar
+
+    // Add all vocab neighbor pairs
+    state.singleNotePerformance = {
+      C: {
+        G: [true, true, true, true],
+        E: [true, true, true, true],
+      },
+      G: {
+        C: [true, true, true, true],
+        E: [true, true, true, true],
+      },
+      E: {
+        C: [true, true, true, true],
+        G: [true, true, true, true],
+      },
+    };
+
+    const [, , , , , introducedNote2] = selectTargetNote(state, mockPickOctave);
+    expect(introducedNote2).toBe("A");
   });
 });

@@ -147,6 +147,45 @@ export function getAdjacentNotes(note: FullTone): [FullTone, FullTone] {
 }
 
 /**
+ * Get the adjacent notes to a note within a vocabulary.
+ * Returns [lower, upper] neighbors in chromatic order from the vocabulary.
+ * Returns null for a direction if no neighbor exists in that direction.
+ */
+export function getAdjacentNotesInVocabulary(
+  note: FullTone,
+  vocabulary: FullTone[]
+): [FullTone | null, FullTone | null] {
+  if (!vocabulary.includes(note) || vocabulary.length < 2) {
+    return [null, null];
+  }
+
+  const noteIdx = FULL_TONES.indexOf(note);
+
+  // Find nearest note above (in chromatic order) from vocabulary
+  let upper: FullTone | null = null;
+  for (let offset = 1; offset < FULL_TONES.length; offset++) {
+    const candidate = FULL_TONES[(noteIdx + offset) % FULL_TONES.length];
+    if (vocabulary.includes(candidate) && candidate !== note) {
+      upper = candidate;
+      break;
+    }
+  }
+
+  // Find nearest note below from vocabulary
+  let lower: FullTone | null = null;
+  for (let offset = 1; offset < FULL_TONES.length; offset++) {
+    const candidate =
+      FULL_TONES[(noteIdx - offset + FULL_TONES.length) % FULL_TONES.length];
+    if (vocabulary.includes(candidate) && candidate !== note) {
+      lower = candidate;
+      break;
+    }
+  }
+
+  return [lower, upper];
+}
+
+/**
  * Get the chromatic distance between two notes (0-6, wrapping).
  */
 export function getNoteDistance(a: FullTone, b: FullTone): number {
@@ -285,26 +324,75 @@ export function getReadySingleNotePairs(
 }
 
 /**
- * Check if all vocabulary pairs are familiar for single-note questions.
+ * Get all adjacent pairs in vocabulary (notes that are neighbors in the learning set).
+ */
+export function getAdjacentVocabPairs(
+  vocabulary: FullTone[]
+): Array<[FullTone, FullTone]> {
+  const pairs: Array<[FullTone, FullTone]> = [];
+  const seen = new Set<string>();
+
+  for (const note of vocabulary) {
+    const [lower, upper] = getAdjacentNotesInVocabulary(note, vocabulary);
+
+    if (lower) {
+      const key = [note, lower].sort().join("-");
+      if (!seen.has(key)) {
+        seen.add(key);
+        pairs.push([note, lower]);
+      }
+    }
+    if (upper && upper !== lower) {
+      const key = [note, upper].sort().join("-");
+      if (!seen.has(key)) {
+        seen.add(key);
+        pairs.push([note, upper]);
+      }
+    }
+  }
+
+  return pairs;
+}
+
+/**
+ * Check if all vocabulary notes are single-note-familiar with their vocab neighbors.
  * Used to gate introduction of new notes.
+ * Each note must be distinguishable from the notes on either side of it
+ * within the learning set (not chromatic neighbors).
  */
 export function areAllVocabSingleNotesFamiliar(state: ToneQuizState): boolean {
   const vocab = state.learningVocabulary;
-  const readyPairs = getReadySingleNotePairs(state);
 
-  // If vocabulary has 2+ notes, at least one pair must be ready for
-  // single-note questions before we can introduce more notes
-  if (vocab.length >= 2 && readyPairs.length === 0) {
-    return false;
+  // Need at least 2 notes to have neighbors
+  if (vocab.length < 2) {
+    return true;
   }
 
-  // Check if all ready pairs are familiar
-  return readyPairs.every(([a, b]) => isSingleNotePairFamiliar(state, a, b));
+  // Check that each note is single-note-familiar with its vocab neighbors
+  for (const note of vocab) {
+    const [lower, upper] = getAdjacentNotesInVocabulary(note, vocab);
+
+    // Must be familiar with lower neighbor (bidirectionally)
+    if (lower && !isSingleNotePairFamiliar(state, note, lower)) {
+      return false;
+    }
+
+    // Must be familiar with upper neighbor (bidirectionally)
+    // Note: for 2-note vocab, upper === lower, so this is redundant but harmless
+    if (upper && upper !== lower && !isSingleNotePairFamiliar(state, note, upper)) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 /**
  * Select a pair for single-note question.
- * Prefers unfamiliar pairs to help the user learn.
+ * Prioritizes:
+ * 1. Adjacent pairs (neighbors in learning set) that aren't familiar
+ * 2. Other unfamiliar pairs
+ * 3. Any ready pair
  * Returns null if no pairs are ready for single-note questions.
  */
 export function selectSingleNotePair(
@@ -314,14 +402,39 @@ export function selectSingleNotePair(
 
   if (readyPairs.length === 0) return null;
 
-  // Prefer pairs that aren't yet familiar
+  const vocab = state.learningVocabulary;
+  const adjacentPairs = getAdjacentVocabPairs(vocab);
+
+  // Filter to adjacent pairs that are also ready
+  const readyAdjacentPairs = adjacentPairs.filter(([a, b]) =>
+    readyPairs.some(
+      ([ra, rb]) => (ra === a && rb === b) || (ra === b && rb === a)
+    )
+  );
+
+  // Priority 1: Unfamiliar adjacent pairs
+  const unfamiliarAdjacent = readyAdjacentPairs.filter(
+    ([a, b]) => !isSingleNotePairFamiliar(state, a, b)
+  );
+  if (unfamiliarAdjacent.length > 0) {
+    const [noteA, noteB] =
+      unfamiliarAdjacent[Math.floor(Math.random() * unfamiliarAdjacent.length)];
+    return { noteA, noteB };
+  }
+
+  // Priority 2: Any unfamiliar pairs
   const unfamiliarPairs = readyPairs.filter(
     ([a, b]) => !isSingleNotePairFamiliar(state, a, b)
   );
+  if (unfamiliarPairs.length > 0) {
+    const [noteA, noteB] =
+      unfamiliarPairs[Math.floor(Math.random() * unfamiliarPairs.length)];
+    return { noteA, noteB };
+  }
 
-  const candidates = unfamiliarPairs.length > 0 ? unfamiliarPairs : readyPairs;
-  const [noteA, noteB] = candidates[Math.floor(Math.random() * candidates.length)];
-
+  // Priority 3: Any ready pair
+  const [noteA, noteB] =
+    readyPairs[Math.floor(Math.random() * readyPairs.length)];
   return { noteA, noteB };
 }
 
