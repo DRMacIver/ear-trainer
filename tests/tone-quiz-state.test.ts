@@ -870,12 +870,12 @@ describe("selectMostUrgentPair", () => {
 
     // Create a card that's due (reviewed long ago, past its interval)
     state = recordPairReview(state, "C", "E", Grade.GOOD);
-    // FSRS GOOD on new card gives interval ~3 days, so 7 days ago is definitely due
-    state.pairCards["C-E"].lastReviewedAt = now - 7 * 24 * 60 * 60 * 1000;
+    // FSRS GOOD on new card gives interval ~3 hours, so 10 hours ago is definitely due
+    state.pairCards["C-E"].lastReviewedAt = now - 10 * 60 * 60 * 1000;
 
     // Create another due card, reviewed even longer ago (more urgent)
     state = recordPairReview(state, "C", "G", Grade.GOOD);
-    state.pairCards["C-G"].lastReviewedAt = now - 14 * 24 * 60 * 60 * 1000; // 14 days ago
+    state.pairCards["C-G"].lastReviewedAt = now - 24 * 60 * 60 * 1000; // 24 hours ago
 
     const pair = selectMostUrgentPair(state);
 
@@ -895,7 +895,7 @@ describe("selectMostUrgentPair", () => {
 
     // Create a card that IS due
     state = recordPairReview(state, "C", "E", Grade.GOOD);
-    state.pairCards["C-E"].lastReviewedAt = now - 7 * 24 * 60 * 60 * 1000; // 7 days ago
+    state.pairCards["C-E"].lastReviewedAt = now - 10 * 60 * 60 * 1000; // 10 hours ago
 
     const pair = selectMostUrgentPair(state);
 

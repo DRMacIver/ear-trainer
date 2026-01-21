@@ -285,7 +285,7 @@ export function getRepeatProbability(state: ToneQuizState, now: number): number 
 
 /**
  * Select the most urgent pair to review based on FSRS retrievability.
- * Only considers cards that are due (days since review >= scheduled interval).
+ * Only considers cards that are due (hours since review >= scheduled interval).
  * Returns the pair with lowest retrievability (most likely to be forgotten).
  */
 export function selectMostUrgentPair(
@@ -296,11 +296,11 @@ export function selectMostUrgentPair(
     .filter(([, pc]) => pc.card !== null)
     .map(([key, pc]) => {
       const [target, other] = key.split("-") as [FullTone, FullTone];
-      const days = pc.lastReviewedAt
-        ? (now - pc.lastReviewedAt) / (1000 * 60 * 60 * 24)
+      const hours = pc.lastReviewedAt
+        ? (now - pc.lastReviewedAt) / (1000 * 60 * 60)
         : Infinity;
-      const retrievability = deck.getRetrievability(pc.card!, days);
-      const isDue = days >= pc.card!.I; // Due when days elapsed >= scheduled interval
+      const retrievability = deck.getRetrievability(pc.card!, hours);
+      const isDue = hours >= pc.card!.I; // Due when hours elapsed >= scheduled interval
       return { target, other, retrievability, isDue };
     })
     .filter((p) => p.isDue); // Only consider cards that are due
@@ -314,6 +314,7 @@ export function selectMostUrgentPair(
 
 /**
  * Record a review for a target-other pair in FSRS.
+ * Uses hours as the time unit (faster decay than typical flashcards).
  */
 export function recordPairReview(
   state: ToneQuizState,
@@ -329,10 +330,10 @@ export function recordPairReview(
   if (!existing?.card) {
     newCard = deck.newCard(grade);
   } else {
-    const days = existing.lastReviewedAt
-      ? (now - existing.lastReviewedAt) / (1000 * 60 * 60 * 24)
+    const hours = existing.lastReviewedAt
+      ? (now - existing.lastReviewedAt) / (1000 * 60 * 60)
       : 0;
-    newCard = deck.gradeCard(existing.card, days, grade);
+    newCard = deck.gradeCard(existing.card, hours, grade);
   }
 
   return {
