@@ -19,6 +19,13 @@ import {
   getRepeatProbability,
   recordPairReview,
   selectMostUrgentPair,
+  isReadyForSingleNote,
+  isPairReadyForSingleNote,
+  isSingleNoteFamiliarWith,
+  isSingleNotePairFamiliar,
+  getReadySingleNotePairs,
+  areAllVocabSingleNotesFamiliar,
+  selectSingleNotePair,
   Grade,
   FullTone,
   FULL_TONES,
@@ -992,5 +999,322 @@ describe("loadState migration", () => {
     expect(loaded.session.sessionStartTime).toBeDefined();
     // previousSessionEnd should be set to lastPlayedAt for migration
     expect(loaded.session.previousSessionEnd).toBe(oldState.lastPlayedAt);
+  });
+});
+
+describe("Single-note question functions", () => {
+  beforeEach(() => {
+    localStorageMock.clear();
+  });
+
+  describe("isReadyForSingleNote", () => {
+    it("returns false when note is not familiar with adjacent notes", () => {
+      const state = loadState();
+      expect(isReadyForSingleNote(state, "C")).toBe(false);
+    });
+
+    it("returns true when note is familiar with both adjacent notes", () => {
+      let state = loadState();
+      // C is adjacent to B and D
+      state.performance = {
+        C: {
+          B: [true, true, true, true],
+          D: [true, true, true, true],
+        },
+      };
+      expect(isReadyForSingleNote(state, "C")).toBe(true);
+    });
+  });
+
+  describe("isPairReadyForSingleNote", () => {
+    it("returns false when neither note is ready", () => {
+      const state = loadState();
+      expect(isPairReadyForSingleNote(state, "C", "G")).toBe(false);
+    });
+
+    it("returns false when only one note is ready", () => {
+      let state = loadState();
+      // C is ready (familiar with B and D)
+      state.performance = {
+        C: {
+          B: [true, true, true, true],
+          D: [true, true, true, true],
+        },
+      };
+      expect(isPairReadyForSingleNote(state, "C", "G")).toBe(false);
+    });
+
+    it("returns true when both notes are ready", () => {
+      let state = loadState();
+      // C is adjacent to B and D, G is adjacent to F and A
+      state.performance = {
+        C: {
+          B: [true, true, true, true],
+          D: [true, true, true, true],
+        },
+        G: {
+          F: [true, true, true, true],
+          A: [true, true, true, true],
+        },
+      };
+      expect(isPairReadyForSingleNote(state, "C", "G")).toBe(true);
+    });
+  });
+
+  describe("isSingleNoteFamiliarWith", () => {
+    it("returns false with no data", () => {
+      const state = loadState();
+      expect(isSingleNoteFamiliarWith(state, "C", "G")).toBe(false);
+    });
+
+    it("returns false with insufficient data", () => {
+      let state = loadState();
+      state.singleNotePerformance = {
+        C: { G: [true, true] }, // Only 2 samples, need 4
+      };
+      expect(isSingleNoteFamiliarWith(state, "C", "G")).toBe(false);
+    });
+
+    it("returns true with good performance", () => {
+      let state = loadState();
+      state.singleNotePerformance = {
+        C: { G: [true, true, true, true] },
+      };
+      expect(isSingleNoteFamiliarWith(state, "C", "G")).toBe(true);
+    });
+
+    it("returns false with poor performance", () => {
+      let state = loadState();
+      state.singleNotePerformance = {
+        C: { G: [false, false, true, false] },
+      };
+      expect(isSingleNoteFamiliarWith(state, "C", "G")).toBe(false);
+    });
+  });
+
+  describe("isSingleNotePairFamiliar", () => {
+    it("returns false when neither direction is familiar", () => {
+      const state = loadState();
+      expect(isSingleNotePairFamiliar(state, "C", "G")).toBe(false);
+    });
+
+    it("returns false when only one direction is familiar", () => {
+      let state = loadState();
+      state.singleNotePerformance = {
+        C: { G: [true, true, true, true] },
+        // G -> C is missing
+      };
+      expect(isSingleNotePairFamiliar(state, "C", "G")).toBe(false);
+    });
+
+    it("returns true when both directions are familiar", () => {
+      let state = loadState();
+      state.singleNotePerformance = {
+        C: { G: [true, true, true, true] },
+        G: { C: [true, true, true, true] },
+      };
+      expect(isSingleNotePairFamiliar(state, "C", "G")).toBe(true);
+    });
+  });
+
+  describe("getReadySingleNotePairs", () => {
+    it("returns empty array when no pairs are ready", () => {
+      const state = loadState();
+      expect(getReadySingleNotePairs(state)).toEqual([]);
+    });
+
+    it("returns pairs where both notes are ready for single-note questions", () => {
+      let state = loadState();
+      state.learningVocabulary = ["C", "G"];
+      // C is adjacent to B and D, G is adjacent to F and A
+      state.performance = {
+        C: {
+          B: [true, true, true, true],
+          D: [true, true, true, true],
+        },
+        G: {
+          F: [true, true, true, true],
+          A: [true, true, true, true],
+        },
+      };
+      const pairs = getReadySingleNotePairs(state);
+      expect(pairs.length).toBe(1);
+      expect(pairs[0]).toEqual(["C", "G"]);
+    });
+  });
+
+  describe("areAllVocabSingleNotesFamiliar", () => {
+    it("returns true when no pairs are ready (early game)", () => {
+      const state = loadState();
+      expect(areAllVocabSingleNotesFamiliar(state)).toBe(true);
+    });
+
+    it("returns false when ready pairs are not familiar", () => {
+      let state = loadState();
+      state.learningVocabulary = ["C", "G"];
+      state.performance = {
+        C: {
+          B: [true, true, true, true],
+          D: [true, true, true, true],
+        },
+        G: {
+          F: [true, true, true, true],
+          A: [true, true, true, true],
+        },
+      };
+      // Pair is ready but not familiar in single-note mode
+      expect(areAllVocabSingleNotesFamiliar(state)).toBe(false);
+    });
+
+    it("returns true when all ready pairs are familiar", () => {
+      let state = loadState();
+      state.learningVocabulary = ["C", "G"];
+      state.performance = {
+        C: {
+          B: [true, true, true, true],
+          D: [true, true, true, true],
+        },
+        G: {
+          F: [true, true, true, true],
+          A: [true, true, true, true],
+        },
+      };
+      state.singleNotePerformance = {
+        C: { G: [true, true, true, true] },
+        G: { C: [true, true, true, true] },
+      };
+      expect(areAllVocabSingleNotesFamiliar(state)).toBe(true);
+    });
+  });
+
+  describe("selectSingleNotePair", () => {
+    it("returns null when no pairs are ready", () => {
+      const state = loadState();
+      expect(selectSingleNotePair(state)).toBeNull();
+    });
+
+    it("returns a pair when pairs are ready", () => {
+      let state = loadState();
+      state.learningVocabulary = ["C", "G"];
+      state.performance = {
+        C: {
+          B: [true, true, true, true],
+          D: [true, true, true, true],
+        },
+        G: {
+          F: [true, true, true, true],
+          A: [true, true, true, true],
+        },
+      };
+      const pair = selectSingleNotePair(state);
+      expect(pair).not.toBeNull();
+      expect(pair!.noteA).toBe("C");
+      expect(pair!.noteB).toBe("G");
+    });
+  });
+});
+
+describe("recordQuestion for single-note questions", () => {
+  beforeEach(() => {
+    localStorageMock.clear();
+  });
+
+  it("tracks single-note performance separately", () => {
+    let state = loadState();
+
+    state = recordQuestion(state, {
+      timestamp: Date.now(),
+      questionType: "single-note",
+      noteA: "C4",
+      noteB: "",
+      targetNote: "C",
+      otherNote: "G",
+      correct: true,
+      wasFirstInStreak: true,
+    });
+
+    // Should track in singleNotePerformance, not performance
+    expect(state.singleNotePerformance["C"]?.["G"]).toEqual([true]);
+    expect(state.performance["C"]?.["G"]).toBeUndefined();
+  });
+
+  it("still updates FSRS for single-note questions", () => {
+    let state = loadState();
+
+    state = recordQuestion(state, {
+      timestamp: Date.now(),
+      questionType: "single-note",
+      noteA: "C4",
+      noteB: "",
+      targetNote: "C",
+      otherNote: "G",
+      correct: true,
+      wasFirstInStreak: true,
+    });
+
+    expect(state.pairCards["C-G"]).toBeDefined();
+    expect(state.pairCards["C-G"].card).not.toBeNull();
+  });
+});
+
+describe("Note introduction gates on single-note familiarity", () => {
+  beforeEach(() => {
+    localStorageMock.clear();
+  });
+
+  const mockPickOctave = () => 4;
+
+  it("does not introduce note when single-note pairs are not familiar", () => {
+    let state = loadState();
+    state.learningVocabulary = ["C", "G"];
+    // Set up E as ready by streak
+    state.candidateStreaks = {
+      "C-E": 5,
+      "G-E": 5,
+    };
+    state.correctStreak = STREAK_LENGTH;
+    // C and G are familiar with adjacent notes (ready for single-note)
+    state.performance = {
+      C: {
+        B: [true, true, true, true],
+        D: [true, true, true, true],
+      },
+      G: {
+        F: [true, true, true, true],
+        A: [true, true, true, true],
+      },
+    };
+    // But single-note performance is not yet familiar
+
+    const [, , , , , introducedNote] = selectTargetNote(state, mockPickOctave);
+    expect(introducedNote).toBeNull();
+  });
+
+  it("introduces note when single-note pairs are familiar", () => {
+    let state = loadState();
+    state.learningVocabulary = ["C", "G"];
+    state.candidateStreaks = {
+      "C-E": 5,
+      "G-E": 5,
+    };
+    state.correctStreak = STREAK_LENGTH;
+    state.performance = {
+      C: {
+        B: [true, true, true, true],
+        D: [true, true, true, true],
+      },
+      G: {
+        F: [true, true, true, true],
+        A: [true, true, true, true],
+      },
+    };
+    // Single-note is also familiar
+    state.singleNotePerformance = {
+      C: { G: [true, true, true, true] },
+      G: { C: [true, true, true, true] },
+    };
+
+    const [, , , , , introducedNote] = selectTargetNote(state, mockPickOctave);
+    expect(introducedNote).toBe("E");
   });
 });

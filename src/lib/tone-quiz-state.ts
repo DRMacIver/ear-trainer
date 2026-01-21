@@ -31,10 +31,13 @@ const CANDIDATE_STREAK_THRESHOLD = 5;
 /** Maximum questions without introduction before forcing it */
 const MAX_QUESTIONS_WITHOUT_INTRODUCTION = 30;
 
+export type QuestionType = "two-note" | "single-note";
+
 export interface QuestionRecord {
   timestamp: number;
-  noteA: string; // Note played first (with octave, e.g., "C4")
-  noteB: string; // Note played second (with octave, e.g., "D4")
+  questionType?: QuestionType; // Optional for backwards compat, defaults to "two-note"
+  noteA: string; // Note played first (with octave, e.g., "C4"), or only note for single-note
+  noteB: string; // Note played second (with octave, e.g., "D4"), empty for single-note
   targetNote: string; // Which note we asked about (without octave, e.g., "C")
   otherNote: string; // The other note family (without octave)
   correct: boolean;
@@ -61,7 +64,11 @@ export interface ToneQuizState {
 
   // Learning state
   learningVocabulary: FullTone[]; // Notes currently being learned
-  performance: Record<string, Record<string, boolean[]>>; // target -> other -> results
+  performance: Record<string, Record<string, boolean[]>>; // target -> other -> results (two-note questions)
+
+  // Single-note question performance: played -> alternative -> results
+  // e.g., singleNotePerformance["C"]["G"] tracks "identify C when choice is C vs G"
+  singleNotePerformance: Record<string, Record<string, boolean[]>>;
 
   // Sticky target state
   currentTarget: FullTone | null;
@@ -84,6 +91,7 @@ function createInitialState(): ToneQuizState {
     lastPlayedAt: null,
     learningVocabulary: ["C", "G"], // Start with C and G
     performance: {},
+    singleNotePerformance: {},
     currentTarget: null,
     currentTargetOctave: null,
     correctStreak: 0,
@@ -109,7 +117,8 @@ export function loadState(): ToneQuizState {
   return {
     ...initial,
     ...parsed,
-    // Ensure new FSRS fields have defaults (migration from older state)
+    // Ensure new fields have defaults (migration from older state)
+    singleNotePerformance: parsed.singleNotePerformance ?? {},
     pairCards: parsed.pairCards ?? {},
     session: parsed.session ?? {
       sessionStartTime: Date.now(),
@@ -203,6 +212,113 @@ export function isFamiliarWith(
 export function isNoteFamiliar(state: ToneQuizState, note: FullTone): boolean {
   const [lower, upper] = getAdjacentNotes(note);
   return isFamiliarWith(state, note, lower) && isFamiliarWith(state, note, upper);
+}
+
+/**
+ * Check if a note is ready for single-note questions.
+ * A note is ready when the user can distinguish it from both adjacent notes.
+ */
+export function isReadyForSingleNote(state: ToneQuizState, note: FullTone): boolean {
+  return isNoteFamiliar(state, note);
+}
+
+/**
+ * Check if a pair of notes is ready for single-note questions.
+ * Both notes must be able to be distinguished from their adjacent notes.
+ */
+export function isPairReadyForSingleNote(
+  state: ToneQuizState,
+  noteA: FullTone,
+  noteB: FullTone
+): boolean {
+  return isReadyForSingleNote(state, noteA) && isReadyForSingleNote(state, noteB);
+}
+
+/**
+ * Check if user is familiar with identifying a note in single-note questions.
+ * Tracks: "when `played` was played, and choice was `played` vs `alternative`, was it correct?"
+ */
+export function isSingleNoteFamiliarWith(
+  state: ToneQuizState,
+  played: FullTone,
+  alternative: FullTone
+): boolean {
+  const results = state.singleNotePerformance[played]?.[alternative] ?? [];
+  if (results.length < FAMILIARITY_WINDOW) return false;
+  const recent = results.slice(-FAMILIARITY_WINDOW);
+  const correct = recent.filter(Boolean).length;
+  return correct >= FAMILIARITY_THRESHOLD;
+}
+
+/**
+ * Check if a pair is familiar for single-note questions in both directions.
+ */
+export function isSingleNotePairFamiliar(
+  state: ToneQuizState,
+  noteA: FullTone,
+  noteB: FullTone
+): boolean {
+  return (
+    isSingleNoteFamiliarWith(state, noteA, noteB) &&
+    isSingleNoteFamiliarWith(state, noteB, noteA)
+  );
+}
+
+/**
+ * Get all pairs in vocabulary that are ready for single-note questions.
+ */
+export function getReadySingleNotePairs(
+  state: ToneQuizState
+): Array<[FullTone, FullTone]> {
+  const pairs: Array<[FullTone, FullTone]> = [];
+  const vocab = state.learningVocabulary;
+
+  for (let i = 0; i < vocab.length; i++) {
+    for (let j = i + 1; j < vocab.length; j++) {
+      if (isPairReadyForSingleNote(state, vocab[i], vocab[j])) {
+        pairs.push([vocab[i], vocab[j]]);
+      }
+    }
+  }
+
+  return pairs;
+}
+
+/**
+ * Check if all vocabulary pairs are familiar for single-note questions.
+ * Used to gate introduction of new notes.
+ */
+export function areAllVocabSingleNotesFamiliar(state: ToneQuizState): boolean {
+  const readyPairs = getReadySingleNotePairs(state);
+
+  // If no pairs are ready yet, allow introduction (early game)
+  if (readyPairs.length === 0) return true;
+
+  // Check if all ready pairs are familiar
+  return readyPairs.every(([a, b]) => isSingleNotePairFamiliar(state, a, b));
+}
+
+/**
+ * Select a pair for single-note question.
+ * Prefers unfamiliar pairs to help the user learn.
+ * Returns null if no pairs are ready for single-note questions.
+ */
+export function selectSingleNotePair(
+  state: ToneQuizState
+): { noteA: FullTone; noteB: FullTone } | null {
+  const readyPairs = getReadySingleNotePairs(state);
+
+  if (readyPairs.length === 0) return null;
+
+  // Prefer pairs that aren't yet familiar
+  const unfamiliarPairs = readyPairs.filter(
+    ([a, b]) => !isSingleNotePairFamiliar(state, a, b)
+  );
+
+  const candidates = unfamiliarPairs.length > 0 ? unfamiliarPairs : readyPairs;
+  const [noteA, noteB] = candidates[Math.floor(Math.random() * candidates.length)];
+
+  return { noteA, noteB };
 }
 
 /**
@@ -368,31 +484,47 @@ export function recordQuestion(
   if (record.wasFirstInStreak) {
     const target = record.targetNote as FullTone;
     const other = record.otherNote as FullTone;
+    const questionType = record.questionType ?? "two-note";
 
-    if (!newState.performance[target]) {
-      newState.performance[target] = {};
-    }
-    if (!newState.performance[target][other]) {
-      newState.performance[target][other] = [];
-    }
-    newState.performance[target][other] = [
-      ...newState.performance[target][other],
-      record.correct,
-    ];
+    if (questionType === "single-note") {
+      // Track single-note performance: target is the played note, other is the alternative
+      if (!newState.singleNotePerformance[target]) {
+        newState.singleNotePerformance[target] = {};
+      }
+      if (!newState.singleNotePerformance[target][other]) {
+        newState.singleNotePerformance[target][other] = [];
+      }
+      newState.singleNotePerformance[target][other] = [
+        ...newState.singleNotePerformance[target][other],
+        record.correct,
+      ];
+    } else {
+      // Track two-note performance (existing logic)
+      if (!newState.performance[target]) {
+        newState.performance[target] = {};
+      }
+      if (!newState.performance[target][other]) {
+        newState.performance[target][other] = [];
+      }
+      newState.performance[target][other] = [
+        ...newState.performance[target][other],
+        record.correct,
+      ];
 
-    // Track candidate streaks when the "other" note is the next candidate
-    const candidate = getNextNoteToLearn(state);
-    if (candidate && other === candidate) {
-      const key = `${target}-${candidate}`;
-      if (record.correct) {
-        newState.candidateStreaks[key] = (newState.candidateStreaks[key] ?? 0) + 1;
-      } else {
-        // Reset streak on wrong answer
-        newState.candidateStreaks[key] = 0;
+      // Track candidate streaks when the "other" note is the next candidate
+      const candidate = getNextNoteToLearn(state);
+      if (candidate && other === candidate) {
+        const key = `${target}-${candidate}`;
+        if (record.correct) {
+          newState.candidateStreaks[key] = (newState.candidateStreaks[key] ?? 0) + 1;
+        } else {
+          // Reset streak on wrong answer
+          newState.candidateStreaks[key] = 0;
+        }
       }
     }
 
-    // Update FSRS state for this pair
+    // Update FSRS state for this pair (both question types)
     const grade = record.correct ? Grade.GOOD : Grade.AGAIN;
     newState = recordPairReview(newState, target, other, grade);
   }
@@ -516,11 +648,13 @@ export function selectTargetNote(
     // Introduce new note if:
     // 1. Candidate has 5 consecutive correct against each of its two closest vocabulary notes
     // 2. OR 30 questions have passed without a new introduction
+    // AND user is reliable on single-note questions for all current vocab pairs
     const readyByStreak = isCandidateReadyByStreak(state, nextNote);
     const readyByTime =
       state.questionsSinceLastIntroduction >= MAX_QUESTIONS_WITHOUT_INTRODUCTION;
+    const singleNoteReliable = areAllVocabSingleNotesFamiliar(state);
 
-    if (readyByStreak || readyByTime) {
+    if ((readyByStreak || readyByTime) && singleNoteReliable) {
       newVocabulary = [...state.learningVocabulary, nextNote];
       introducedNote = nextNote;
     }

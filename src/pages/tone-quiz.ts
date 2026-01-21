@@ -18,9 +18,12 @@ import {
   maybeStartNewSession,
   getRepeatProbability,
   selectMostUrgentPair,
+  selectSingleNotePair,
+  getReadySingleNotePairs,
   ToneQuizState,
   FullTone,
   FULL_TONES,
+  QuestionType,
 } from "../lib/tone-quiz-state.js";
 
 const NOTE_DURATION = 0.6;
@@ -29,12 +32,13 @@ const INTRO_NOTE_DURATION = 0.5;
 const INTRO_NOTE_GAP = 150; // ms
 
 interface QuestionState {
-  noteA: string; // First note played (with octave)
-  noteB: string; // Second note played (with octave)
+  questionType: QuestionType;
+  noteA: string; // First note played (with octave), or the only note for single-note
+  noteB: string; // Second note played (with octave), empty for single-note
   familyA: FullTone; // Note family of first note
-  familyB: FullTone; // Note family of second note
-  targetNote: FullTone; // Which note family we're asking about
-  otherNote: FullTone; // The other note family
+  familyB: FullTone; // Note family of second note (same as familyA for single-note)
+  targetNote: FullTone; // Correct answer (which note was played for single-note)
+  otherNote: FullTone; // The alternative choice
   hasAnswered: boolean;
   wasCorrect: boolean | null;
   isFirstInStreak: boolean;
@@ -100,11 +104,20 @@ function pickOtherOctave(target: FullTone, other: FullTone): number {
   return 4;
 }
 
+/** Probability of getting a single-note question when pairs are available */
+const SINGLE_NOTE_QUESTION_CHANCE = 0.3;
+
 function initQuestion(): { isNewTarget: boolean; introducedNote: FullTone | null } {
   const now = Date.now();
 
   // Maybe start new session (if inactive for more than 5 minutes)
   persistentState = maybeStartNewSession(persistentState, now);
+
+  // Check if we should do a single-note question
+  const readyPairs = getReadySingleNotePairs(persistentState);
+  if (readyPairs.length > 0 && Math.random() < SINGLE_NOTE_QUESTION_CHANCE) {
+    return initSingleNoteQuestion();
+  }
 
   // Roll for repeat based on session freshness
   const repeatProb = getRepeatProbability(persistentState, now);
@@ -121,6 +134,41 @@ function initQuestion(): { isNewTarget: boolean; introducedNote: FullTone | null
 
   // Fall through to normal selection
   return initQuestionNormal();
+}
+
+/** Initialize a single-note question */
+function initSingleNoteQuestion(): { isNewTarget: boolean; introducedNote: FullTone | null } {
+  const pair = selectSingleNotePair(persistentState);
+  if (!pair) {
+    // Fallback to normal question if no pairs available
+    return initQuestionNormal();
+  }
+
+  const { noteA, noteB } = pair;
+
+  // Randomly pick which note to play
+  const playNote = Math.random() < 0.5 ? noteA : noteB;
+  const alternative = playNote === noteA ? noteB : noteA;
+
+  const playedOctave = pickTargetOctave(); // Single notes always in octave 4
+  const playedWithOctave = `${playNote}${playedOctave}`;
+
+  question = {
+    questionType: "single-note",
+    noteA: playedWithOctave, // The note that will be played
+    noteB: "", // Not used for single-note
+    familyA: playNote,
+    familyB: playNote, // Same as familyA for single-note
+    targetNote: playNote, // The correct answer
+    otherNote: alternative, // The wrong answer
+    hasAnswered: false,
+    wasCorrect: null,
+    isFirstInStreak: true,
+    countsForStreak: true,
+    startTime: Date.now(),
+  };
+
+  return { isNewTarget: false, introducedNote: null };
 }
 
 /** Initialize question from a specific target-other pair (FSRS repeat) */
@@ -155,6 +203,7 @@ function initQuestionFromPair(
   }
 
   question = {
+    questionType: "two-note",
     noteA: first.note,
     noteB: second.note,
     familyA: first.family,
@@ -192,6 +241,7 @@ function initQuestionNormal(): { isNewTarget: boolean; introducedNote: FullTone 
   );
 
   question = {
+    questionType: "two-note",
     noteA: first.note,
     noteB: second.note,
     familyA: first.family,
@@ -208,11 +258,13 @@ function initQuestionNormal(): { isNewTarget: boolean; introducedNote: FullTone 
   return { isNewTarget, introducedNote };
 }
 
-async function playBothNotes(): Promise<void> {
+async function playQuestionNotes(): Promise<void> {
   isPlaying = true;
   await playNote(question.noteA, { duration: NOTE_DURATION });
-  await new Promise((resolve) => setTimeout(resolve, GAP_BETWEEN_NOTES));
-  await playNote(question.noteB, { duration: NOTE_DURATION });
+  if (question.questionType === "two-note") {
+    await new Promise((resolve) => setTimeout(resolve, GAP_BETWEEN_NOTES));
+    await playNote(question.noteB, { duration: NOTE_DURATION });
+  }
   isPlaying = false;
 }
 
@@ -389,7 +441,7 @@ async function replayIntroSequence(): Promise<void> {
 function finishIntroduction(): void {
   introState = null;
   render();
-  playBothNotes();
+  playQuestionNotes();
 }
 
 function render(): void {
@@ -400,11 +452,22 @@ function render(): void {
   const totalPlayed = persistentState.history.length;
   const vocabDisplay = persistentState.learningVocabulary.join(", ");
 
+  const isSingleNote = question.questionType === "single-note";
+  const description = isSingleNote
+    ? "A note plays. Identify which note it is."
+    : "Two notes play. Identify the named note.";
+  const keyHints = isSingleNote
+    ? `<kbd>1</kbd>/<kbd>←</kbd> ${question.targetNote}, <kbd>2</kbd>/<kbd>→</kbd> ${question.otherNote}, <kbd>R</kbd> Replay, <kbd>Space</kbd> Continue`
+    : "<kbd>1</kbd>/<kbd>←</kbd> First, <kbd>2</kbd>/<kbd>→</kbd> Second, <kbd>R</kbd> Replay, <kbd>Space</kbd> Continue";
+  const questionText = isSingleNote
+    ? `Is this ${question.targetNote} or ${question.otherNote}?`
+    : `Which was the ${question.targetNote}?`;
+
   app.innerHTML = `
     <a href="#/" class="back-link">&larr; Back to exercises</a>
     <h1>Tone Quiz</h1>
-    <p>Two notes play. Identify the named note.</p>
-    <p class="keyboard-hints"><strong>Keys:</strong> <kbd>1</kbd>/<kbd>←</kbd> First, <kbd>2</kbd>/<kbd>→</kbd> Second, <kbd>R</kbd> Replay, <kbd>Space</kbd> Continue</p>
+    <p>${description}</p>
+    <p class="keyboard-hints"><strong>Keys:</strong> ${keyHints}</p>
 
     <div class="exercise-container">
       <div class="controls">
@@ -412,7 +475,7 @@ function render(): void {
       </div>
 
       <div>
-        <h3>Which was the ${question.targetNote}?</h3>
+        <h3>${questionText}</h3>
         <div class="note-choice-buttons" id="choice-buttons"></div>
       </div>
 
@@ -446,11 +509,19 @@ function renderChoiceButtons(): void {
   const container = document.getElementById("choice-buttons")!;
   container.innerHTML = "";
 
-  // Show "First" and "Second" as the choices
-  const choices = [
-    { label: "First", family: question.familyA },
-    { label: "Second", family: question.familyB },
-  ];
+  const isSingleNote = question.questionType === "single-note";
+
+  // For two-note: "First" and "Second"
+  // For single-note: the note names (target and other)
+  const choices = isSingleNote
+    ? [
+        { label: question.targetNote, family: question.targetNote },
+        { label: question.otherNote, family: question.otherNote },
+      ]
+    : [
+        { label: "First", family: question.familyA },
+        { label: "Second", family: question.familyB },
+      ];
 
   choices.forEach((choice, index) => {
     const button = document.createElement("button");
@@ -468,8 +539,8 @@ function renderChoiceButtons(): void {
     }
 
     button.addEventListener("click", () => {
-      if (question.hasAnswered && !question.wasCorrect) {
-        // After wrong answer, clicking plays the note
+      if (question.hasAnswered && !question.wasCorrect && !isSingleNote) {
+        // After wrong answer on two-note, clicking plays the note
         const noteToPlay = index === 0 ? question.noteA : question.noteB;
         playNote(noteToPlay, { duration: NOTE_DURATION });
       } else {
@@ -486,13 +557,13 @@ function handleClearHistory(): void {
     persistentState = loadState();
     initQuestion();
     render();
-    playBothNotes();
+    playQuestionNotes();
   }
 }
 
 function setupEventListeners(): void {
   const playBtn = document.getElementById("play-btn")!;
-  playBtn.addEventListener("click", playBothNotes);
+  playBtn.addEventListener("click", playQuestionNotes);
 
   const clearBtn = document.getElementById("clear-history-btn")!;
   clearBtn.addEventListener("click", handleClearHistory);
@@ -510,7 +581,7 @@ function setupEventListeners(): void {
       handleChoice(1);
     } else if (e.key === "r" || e.key === "R") {
       e.preventDefault();
-      playBothNotes();
+      playQuestionNotes();
     } else if (e.key === " " || e.key === "Enter") {
       e.preventDefault();
       if (isPlaying) return; // Don't advance while audio is playing
@@ -552,8 +623,18 @@ function handleChoice(chosenIndex: number): void {
     return;
   }
 
-  const chosenFamily = chosenIndex === 0 ? question.familyA : question.familyB;
-  const isCorrect = chosenFamily === question.targetNote;
+  const isSingleNote = question.questionType === "single-note";
+
+  // For two-note: first choice is familyA, second is familyB
+  // For single-note: first choice is targetNote, second is otherNote
+  let isCorrect: boolean;
+  if (isSingleNote) {
+    // For single-note, index 0 = targetNote (correct), index 1 = otherNote (wrong)
+    isCorrect = chosenIndex === 0;
+  } else {
+    const chosenFamily = chosenIndex === 0 ? question.familyA : question.familyB;
+    isCorrect = chosenFamily === question.targetNote;
+  }
 
   question.hasAnswered = true;
   question.wasCorrect = isCorrect;
@@ -561,15 +642,17 @@ function handleChoice(chosenIndex: number): void {
   // Decide next action
   if (isCorrect) {
     // 30% chance to repeat with swapped order (doesn't count for streak)
-    shouldRepeatSwapped = Math.random() < REPEAT_CORRECT_CHANCE;
+    // Only for two-note questions
+    shouldRepeatSwapped = !isSingleNote && Math.random() < REPEAT_CORRECT_CHANCE;
   } else {
-    // 70% chance to retry on wrong answer
+    // Always retry on wrong answer
     shouldRetry = Math.random() < RETRY_CHANCE;
   }
 
   // Record to persistent state
   persistentState = recordQuestion(persistentState, {
     timestamp: Date.now(),
+    questionType: question.questionType,
     noteA: question.noteA,
     noteB: question.noteB,
     targetNote: question.targetNote,
@@ -579,8 +662,8 @@ function handleChoice(chosenIndex: number): void {
     timeMs: Date.now() - question.startTime,
   });
 
-  // Only update streak if this question counts and won't be repeated
-  if (question.countsForStreak && !shouldRepeatSwapped) {
+  // Only update streak if this question counts and won't be repeated (two-note only)
+  if (question.countsForStreak && !shouldRepeatSwapped && !isSingleNote) {
     persistentState = updateStreak(persistentState, isCorrect);
   }
   saveState(persistentState);
@@ -592,6 +675,7 @@ function handleChoice(chosenIndex: number): void {
 
 function renderFeedback(): void {
   const feedback = document.getElementById("feedback")!;
+  const isSingleNote = question.questionType === "single-note";
 
   if (question.wasCorrect) {
     feedback.className = "feedback success";
@@ -600,16 +684,25 @@ function renderFeedback(): void {
     autoAdvanceTimeout = setTimeout(advanceToNext, AUTO_ADVANCE_DELAY);
   } else {
     feedback.className = "feedback error";
-    const targetPosition = question.familyA === question.targetNote ? "first" : "second";
-    feedback.innerHTML = `
-      Incorrect. The ${question.targetNote} was ${targetPosition} (the other note was ${question.otherNote}).
-      <br><button id="replay-btn" class="play-again-btn" style="margin-top: 0.5rem;">Replay Both Notes</button>
-      <br><small>Press Space to continue.</small>
-    `;
+
+    if (isSingleNote) {
+      feedback.innerHTML = `
+        Incorrect. That was ${question.targetNote}, not ${question.otherNote}.
+        <br><button id="replay-btn" class="play-again-btn" style="margin-top: 0.5rem;">Replay Note</button>
+        <br><small>Press Space to continue.</small>
+      `;
+    } else {
+      const targetPosition = question.familyA === question.targetNote ? "first" : "second";
+      feedback.innerHTML = `
+        Incorrect. The ${question.targetNote} was ${targetPosition} (the other note was ${question.otherNote}).
+        <br><button id="replay-btn" class="play-again-btn" style="margin-top: 0.5rem;">Replay Both Notes</button>
+        <br><small>Press Space to continue.</small>
+      `;
+    }
 
     const replayBtn = document.getElementById("replay-btn");
     if (replayBtn) {
-      replayBtn.addEventListener("click", playBothNotes);
+      replayBtn.addEventListener("click", playQuestionNotes);
     }
   }
 }
@@ -635,35 +728,48 @@ function clearAutoAdvance(): void {
 function retryQuestion(): void {
   clearAutoAdvance();
 
-  // Keep same notes but randomize order
-  const targetWithOctave = question.familyA === question.targetNote
-    ? question.noteA
-    : question.noteB;
-  const otherWithOctave = question.familyA === question.targetNote
-    ? question.noteB
-    : question.noteA;
+  if (question.questionType === "single-note") {
+    // For single-note questions, just reset the answer state
+    question = {
+      ...question,
+      hasAnswered: false,
+      wasCorrect: null,
+      isFirstInStreak: false, // Retry never counts for familiarity
+      countsForStreak: false,
+      startTime: Date.now(),
+    };
+  } else {
+    // Keep same notes but randomize order
+    const targetWithOctave = question.familyA === question.targetNote
+      ? question.noteA
+      : question.noteB;
+    const otherWithOctave = question.familyA === question.targetNote
+      ? question.noteB
+      : question.noteA;
 
-  const [first, second] = randomizeOrder(
-    { note: targetWithOctave, family: question.targetNote },
-    { note: otherWithOctave, family: question.otherNote }
-  );
+    const [first, second] = randomizeOrder(
+      { note: targetWithOctave, family: question.targetNote },
+      { note: otherWithOctave, family: question.otherNote }
+    );
 
-  question = {
-    noteA: first.note,
-    noteB: second.note,
-    familyA: first.family,
-    familyB: second.family,
-    targetNote: question.targetNote,
-    otherNote: question.otherNote,
-    hasAnswered: false,
-    wasCorrect: null,
-    isFirstInStreak: false, // Retry never counts for familiarity
-    countsForStreak: false, // Retries/repeats don't count for streak
-    startTime: Date.now(),
-  };
+    question = {
+      questionType: "two-note",
+      noteA: first.note,
+      noteB: second.note,
+      familyA: first.family,
+      familyB: second.family,
+      targetNote: question.targetNote,
+      otherNote: question.otherNote,
+      hasAnswered: false,
+      wasCorrect: null,
+      isFirstInStreak: false, // Retry never counts for familiarity
+      countsForStreak: false, // Retries/repeats don't count for streak
+      startTime: Date.now(),
+    };
+  }
 
   render();
-  playBothNotes();
+  playQuestionNotes();
 }
 
 function nextQuestion(): void {
@@ -680,7 +786,7 @@ function nextQuestion(): void {
   if (isNewTarget) {
     flashScreen();
   }
-  playBothNotes();
+  playQuestionNotes();
 }
 
 export function renderToneQuiz(): void {
@@ -695,5 +801,5 @@ export function renderToneQuiz(): void {
   }
 
   render();
-  playBothNotes();
+  playQuestionNotes();
 }
