@@ -33,10 +33,10 @@ const INTRO_NOTE_GAP = 150; // ms
 
 interface QuestionState {
   questionType: QuestionType;
-  noteA: string; // First note played (with octave), or the only note for single-note
-  noteB: string; // Second note played (with octave), empty for single-note
-  familyA: FullTone; // Note family of first note
-  familyB: FullTone; // Note family of second note (same as familyA for single-note)
+  note1: string; // First note played (with octave), or the only note for single-note
+  note2: string; // Second note played (with octave), empty for single-note
+  family1: FullTone; // Note family of first note
+  family2: FullTone; // Note family of second note (same as family1 for single-note)
   targetNote: FullTone; // Correct answer (which note was played for single-note)
   otherNote: FullTone; // The alternative choice
   hasAnswered: boolean;
@@ -144,21 +144,21 @@ function initSingleNoteQuestion(): { isNewTarget: boolean; introducedNote: FullT
     return initQuestionNormal();
   }
 
-  const { noteA, noteB } = pair;
+  const { noteA: pairNote1, noteB: pairNote2 } = pair;
 
   // Randomly pick which note to play
-  const playNote = Math.random() < 0.5 ? noteA : noteB;
-  const alternative = playNote === noteA ? noteB : noteA;
+  const playNote = Math.random() < 0.5 ? pairNote1 : pairNote2;
+  const alternative = playNote === pairNote1 ? pairNote2 : pairNote1;
 
   const playedOctave = pickTargetOctave(); // Single notes always in octave 4
   const playedWithOctave = `${playNote}${playedOctave}`;
 
   question = {
     questionType: "single-note",
-    noteA: playedWithOctave, // The note that will be played
-    noteB: "", // Not used for single-note
-    familyA: playNote,
-    familyB: playNote, // Same as familyA for single-note
+    note1: playedWithOctave, // The note that will be played
+    note2: "", // Not used for single-note
+    family1: playNote,
+    family2: playNote, // Same as family1 for single-note
     targetNote: playNote, // The correct answer
     otherNote: alternative, // The wrong answer
     hasAnswered: false,
@@ -204,10 +204,10 @@ function initQuestionFromPair(
 
   question = {
     questionType: "two-note",
-    noteA: first.note,
-    noteB: second.note,
-    familyA: first.family,
-    familyB: second.family,
+    note1: first.note,
+    note2: second.note,
+    family1: first.family,
+    family2: second.family,
     targetNote,
     otherNote,
     hasAnswered: false,
@@ -242,10 +242,10 @@ function initQuestionNormal(): { isNewTarget: boolean; introducedNote: FullTone 
 
   question = {
     questionType: "two-note",
-    noteA: first.note,
-    noteB: second.note,
-    familyA: first.family,
-    familyB: second.family,
+    note1: first.note,
+    note2: second.note,
+    family1: first.family,
+    family2: second.family,
     targetNote,
     otherNote,
     hasAnswered: false,
@@ -260,10 +260,10 @@ function initQuestionNormal(): { isNewTarget: boolean; introducedNote: FullTone 
 
 async function playQuestionNotes(): Promise<void> {
   isPlaying = true;
-  await playNote(question.noteA, { duration: NOTE_DURATION });
+  await playNote(question.note1, { duration: NOTE_DURATION });
   if (question.questionType === "two-note") {
     await new Promise((resolve) => setTimeout(resolve, GAP_BETWEEN_NOTES));
-    await playNote(question.noteB, { duration: NOTE_DURATION });
+    await playNote(question.note2, { duration: NOTE_DURATION });
   }
   isPlaying = false;
 }
@@ -519,8 +519,8 @@ function renderChoiceButtons(): void {
         { label: question.otherNote, family: question.otherNote },
       ]
     : [
-        { label: "First", family: question.familyA },
-        { label: "Second", family: question.familyB },
+        { label: "First", family: question.family1 },
+        { label: "Second", family: question.family2 },
       ];
 
   choices.forEach((choice, index) => {
@@ -541,7 +541,7 @@ function renderChoiceButtons(): void {
     button.addEventListener("click", () => {
       if (question.hasAnswered && !question.wasCorrect && !isSingleNote) {
         // After wrong answer on two-note, clicking plays the note
-        const noteToPlay = index === 0 ? question.noteA : question.noteB;
+        const noteToPlay = index === 0 ? question.note1 : question.note2;
         playNote(noteToPlay, { duration: NOTE_DURATION });
       } else {
         handleChoice(index);
@@ -625,14 +625,14 @@ function handleChoice(chosenIndex: number): void {
 
   const isSingleNote = question.questionType === "single-note";
 
-  // For two-note: first choice is familyA, second is familyB
+  // For two-note: first choice is family1, second is family2
   // For single-note: first choice is targetNote, second is otherNote
   let isCorrect: boolean;
   if (isSingleNote) {
     // For single-note, index 0 = targetNote (correct), index 1 = otherNote (wrong)
     isCorrect = chosenIndex === 0;
   } else {
-    const chosenFamily = chosenIndex === 0 ? question.familyA : question.familyB;
+    const chosenFamily = chosenIndex === 0 ? question.family1 : question.family2;
     isCorrect = chosenFamily === question.targetNote;
   }
 
@@ -649,12 +649,12 @@ function handleChoice(chosenIndex: number): void {
     shouldRetry = Math.random() < RETRY_CHANCE;
   }
 
-  // Record to persistent state
+  // Record to persistent state (map to noteA/noteB for QuestionRecord)
   persistentState = recordQuestion(persistentState, {
     timestamp: Date.now(),
     questionType: question.questionType,
-    noteA: question.noteA,
-    noteB: question.noteB,
+    noteA: question.note1,
+    noteB: question.note2,
     targetNote: question.targetNote,
     otherNote: question.otherNote,
     correct: isCorrect,
@@ -692,7 +692,7 @@ function renderFeedback(): void {
         <br><small>Press Space to continue.</small>
       `;
     } else {
-      const targetPosition = question.familyA === question.targetNote ? "first" : "second";
+      const targetPosition = question.family1 === question.targetNote ? "first" : "second";
       feedback.innerHTML = `
         Incorrect. The ${question.targetNote} was ${targetPosition} (the other note was ${question.otherNote}).
         <br><button id="replay-btn" class="play-again-btn" style="margin-top: 0.5rem;">Replay Both Notes</button>
@@ -747,20 +747,20 @@ function retryQuestion(): void {
 
     const [first, second] = shouldSwap
       ? [
-          { note: question.noteB, family: question.familyB },
-          { note: question.noteA, family: question.familyA },
+          { note: question.note2, family: question.family2 },
+          { note: question.note1, family: question.family1 },
         ]
       : [
-          { note: question.noteA, family: question.familyA },
-          { note: question.noteB, family: question.familyB },
+          { note: question.note1, family: question.family1 },
+          { note: question.note2, family: question.family2 },
         ];
 
     question = {
       questionType: "two-note",
-      noteA: first.note,
-      noteB: second.note,
-      familyA: first.family,
-      familyB: second.family,
+      note1: first.note,
+      note2: second.note,
+      family1: first.family,
+      family2: second.family,
       targetNote: question.targetNote,
       otherNote: question.otherNote,
       hasAnswered: false,
