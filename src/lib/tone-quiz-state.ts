@@ -681,6 +681,9 @@ function selectWeighted(candidates: FullTone[]): FullTone {
   return candidates[candidates.length - 1];
 }
 
+/** Probability of selecting an unfamiliar vocab neighbor to unlock single-note questions */
+const VOCAB_NEIGHBOR_PRIORITY_CHANCE = 0.3;
+
 /**
  * Select an "other" note for a question about the target.
  * Prioritizes vocab neighbors to unlock single-note questions.
@@ -691,28 +694,30 @@ export function selectOtherNote(
   state: ToneQuizState,
   target: FullTone
 ): FullTone {
-  // Priority 1: Prioritize vocab neighbors we're not familiar with yet
+  // 30% chance to prioritize unfamiliar vocab neighbors
   // This helps unlock single-note questions (which require vocab neighbor familiarity)
-  const [lowerVocab, upperVocab] = getAdjacentNotesInVocabulary(
-    target,
-    state.learningVocabulary
-  );
-  const unfamiliarVocabNeighbors: FullTone[] = [];
-  if (lowerVocab && !isFamiliarWith(state, target, lowerVocab)) {
-    unfamiliarVocabNeighbors.push(lowerVocab);
-  }
-  if (
-    upperVocab &&
-    upperVocab !== lowerVocab &&
-    !isFamiliarWith(state, target, upperVocab)
-  ) {
-    unfamiliarVocabNeighbors.push(upperVocab);
-  }
-  if (unfamiliarVocabNeighbors.length > 0) {
-    // Pick randomly from unfamiliar vocab neighbors
-    return unfamiliarVocabNeighbors[
-      Math.floor(Math.random() * unfamiliarVocabNeighbors.length)
-    ];
+  if (Math.random() < VOCAB_NEIGHBOR_PRIORITY_CHANCE) {
+    const [lowerVocab, upperVocab] = getAdjacentNotesInVocabulary(
+      target,
+      state.learningVocabulary
+    );
+    const unfamiliarVocabNeighbors: FullTone[] = [];
+    if (lowerVocab && !isFamiliarWith(state, target, lowerVocab)) {
+      unfamiliarVocabNeighbors.push(lowerVocab);
+    }
+    if (
+      upperVocab &&
+      upperVocab !== lowerVocab &&
+      !isFamiliarWith(state, target, upperVocab)
+    ) {
+      unfamiliarVocabNeighbors.push(upperVocab);
+    }
+    if (unfamiliarVocabNeighbors.length > 0) {
+      // Pick randomly from unfamiliar vocab neighbors
+      return unfamiliarVocabNeighbors[
+        Math.floor(Math.random() * unfamiliarVocabNeighbors.length)
+      ];
+    }
   }
 
   // 20% chance to select the next candidate note (if one exists)
