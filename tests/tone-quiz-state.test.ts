@@ -611,16 +611,14 @@ describe("Note introduction triggers", () => {
   // Helper to set up state where C and G are ready for single-note questions
   // and familiar with single-note identification (vocab neighbors)
   function setupSingleNoteReady(state: ReturnType<typeof loadState>) {
-    // C and G need to be familiar with chromatic neighbors to be "ready"
-    // for single-note questions (this gates when we ASK single-note questions)
+    // C and G need to be familiar with each other in two-note mode
+    // to be "ready" for single-note questions
     state.performance = {
       C: {
-        B: [true, true, true, true],
-        D: [true, true, true, true],
+        G: [true, true, true, true],
       },
       G: {
-        F: [true, true, true, true],
-        A: [true, true, true, true],
+        C: [true, true, true, true],
       },
     };
     // Single-note familiarity with vocab neighbors gates NOTE INTRODUCTION
@@ -750,12 +748,22 @@ describe("Note introduction triggers", () => {
     state.candidateStreaks = {}; // Reset after E was introduced
     state.questionsSinceLastIntroduction = 0;
     state.correctStreak = STREAK_LENGTH;
-    // Set up all three notes as ready and familiar for single-note
+    // Set up all pairs as familiar in two-note mode (so ready for single-note)
     state.performance = {
-      C: { B: [true, true, true, true], D: [true, true, true, true] },
-      G: { F: [true, true, true, true], A: [true, true, true, true] },
-      E: { D: [true, true, true, true], F: [true, true, true, true] },
+      C: {
+        G: [true, true, true, true],
+        E: [true, true, true, true],
+      },
+      G: {
+        C: [true, true, true, true],
+        E: [true, true, true, true],
+      },
+      E: {
+        C: [true, true, true, true],
+        G: [true, true, true, true],
+      },
     };
+    // Single-note familiar with vocab neighbors
     state.singleNotePerformance = {
       C: { G: [true, true, true, true], E: [true, true, true, true] },
       G: { C: [true, true, true, true], E: [true, true, true, true] },
@@ -1149,34 +1157,31 @@ describe("Single-note question functions", () => {
   });
 
   describe("isPairReadyForSingleNote", () => {
-    it("returns false when neither note is ready", () => {
+    it("returns false when pair is not familiar in either direction", () => {
       const state = loadState();
       expect(isPairReadyForSingleNote(state, "C", "G")).toBe(false);
     });
 
-    it("returns false when only one note is ready", () => {
+    it("returns false when only one direction is familiar", () => {
       let state = loadState();
-      // C is ready (familiar with B and D)
+      // Only C -> G is familiar, not G -> C
       state.performance = {
         C: {
-          B: [true, true, true, true],
-          D: [true, true, true, true],
+          G: [true, true, true, true],
         },
       };
       expect(isPairReadyForSingleNote(state, "C", "G")).toBe(false);
     });
 
-    it("returns true when both notes are ready", () => {
+    it("returns true when pair is familiar in both directions", () => {
       let state = loadState();
-      // C is adjacent to B and D, G is adjacent to F and A
+      // C and G are familiar with each other in two-note mode
       state.performance = {
         C: {
-          B: [true, true, true, true],
-          D: [true, true, true, true],
+          G: [true, true, true, true],
         },
         G: {
-          F: [true, true, true, true],
-          A: [true, true, true, true],
+          C: [true, true, true, true],
         },
       };
       expect(isPairReadyForSingleNote(state, "C", "G")).toBe(true);
@@ -1245,18 +1250,16 @@ describe("Single-note question functions", () => {
       expect(getReadySingleNotePairs(state)).toEqual([]);
     });
 
-    it("returns pairs where both notes are ready for single-note questions", () => {
+    it("returns pairs where both notes are familiar with each other", () => {
       let state = loadState();
       state.learningVocabulary = ["C", "G"];
-      // C is adjacent to B and D, G is adjacent to F and A
+      // C and G are familiar with each other in two-note mode
       state.performance = {
         C: {
-          B: [true, true, true, true],
-          D: [true, true, true, true],
+          G: [true, true, true, true],
         },
         G: {
-          F: [true, true, true, true],
-          A: [true, true, true, true],
+          C: [true, true, true, true],
         },
       };
       const pairs = getReadySingleNotePairs(state);
@@ -1345,14 +1348,13 @@ describe("Single-note question functions", () => {
     it("returns a pair when pairs are ready", () => {
       let state = loadState();
       state.learningVocabulary = ["C", "G"];
+      // C and G are familiar with each other in two-note mode
       state.performance = {
         C: {
-          B: [true, true, true, true],
-          D: [true, true, true, true],
+          G: [true, true, true, true],
         },
         G: {
-          F: [true, true, true, true],
-          A: [true, true, true, true],
+          C: [true, true, true, true],
         },
       };
       const pair = selectSingleNotePair(state);
@@ -1365,22 +1367,22 @@ describe("Single-note question functions", () => {
       let state = loadState();
       // Larger vocab with multiple pairs
       state.learningVocabulary = ["C", "D", "G"];
-      // All notes ready for single-note questions
+      // All pairs familiar in two-note mode (so all pairs are ready)
       state.performance = {
         C: {
-          B: [true, true, true, true],
           D: [true, true, true, true],
+          G: [true, true, true, true],
         },
         D: {
           C: [true, true, true, true],
-          E: [true, true, true, true],
+          G: [true, true, true, true],
         },
         G: {
-          F: [true, true, true, true],
-          A: [true, true, true, true],
+          C: [true, true, true, true],
+          D: [true, true, true, true],
         },
       };
-      // C-G is already familiar, but C-D (adjacent) is not
+      // C-G is already familiar for single-note, but C-D (adjacent) is not
       state.singleNotePerformance = {
         C: { G: [true, true, true, true] },
         G: { C: [true, true, true, true] },

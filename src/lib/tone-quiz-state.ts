@@ -263,14 +263,15 @@ export function isReadyForSingleNote(state: ToneQuizState, note: FullTone): bool
 
 /**
  * Check if a pair of notes is ready for single-note questions.
- * Both notes must be able to be distinguished from their adjacent notes.
+ * A pair is ready when the user can distinguish between them in two-note mode.
  */
 export function isPairReadyForSingleNote(
   state: ToneQuizState,
   noteA: FullTone,
   noteB: FullTone
 ): boolean {
-  return isReadyForSingleNote(state, noteA) && isReadyForSingleNote(state, noteB);
+  // Can ask "Is this A or B?" when user is familiar with A vs B in both directions
+  return isFamiliarWith(state, noteA, noteB) && isFamiliarWith(state, noteB, noteA);
 }
 
 /**
@@ -682,7 +683,7 @@ function selectWeighted(candidates: FullTone[]): FullTone {
 
 /**
  * Select an "other" note for a question about the target.
- * Starts with distant notes, gets closer as user improves.
+ * Prioritizes vocab neighbors to unlock single-note questions.
  * Ensures 50% higher / 50% lower to prevent pitch-based guessing.
  * 20% chance to select the next candidate note (for introduction testing).
  */
@@ -690,6 +691,30 @@ export function selectOtherNote(
   state: ToneQuizState,
   target: FullTone
 ): FullTone {
+  // Priority 1: Prioritize vocab neighbors we're not familiar with yet
+  // This helps unlock single-note questions (which require vocab neighbor familiarity)
+  const [lowerVocab, upperVocab] = getAdjacentNotesInVocabulary(
+    target,
+    state.learningVocabulary
+  );
+  const unfamiliarVocabNeighbors: FullTone[] = [];
+  if (lowerVocab && !isFamiliarWith(state, target, lowerVocab)) {
+    unfamiliarVocabNeighbors.push(lowerVocab);
+  }
+  if (
+    upperVocab &&
+    upperVocab !== lowerVocab &&
+    !isFamiliarWith(state, target, upperVocab)
+  ) {
+    unfamiliarVocabNeighbors.push(upperVocab);
+  }
+  if (unfamiliarVocabNeighbors.length > 0) {
+    // Pick randomly from unfamiliar vocab neighbors
+    return unfamiliarVocabNeighbors[
+      Math.floor(Math.random() * unfamiliarVocabNeighbors.length)
+    ];
+  }
+
   // 20% chance to select the next candidate note (if one exists)
   const candidate = getNextNoteToLearn(state);
   if (candidate && candidate !== target && Math.random() < CANDIDATE_SELECTION_CHANCE) {
