@@ -724,7 +724,10 @@ function clearAutoAdvance(): void {
   }
 }
 
-/** Retry the same question with randomized order */
+/** Probability of swapping note order on retry */
+const RETRY_SWAP_CHANCE = 0.8;
+
+/** Retry the same question, swapping order 80% of the time */
 function retryQuestion(): void {
   clearAutoAdvance();
 
@@ -739,18 +742,18 @@ function retryQuestion(): void {
       startTime: Date.now(),
     };
   } else {
-    // Keep same notes but randomize order
-    const targetWithOctave = question.familyA === question.targetNote
-      ? question.noteA
-      : question.noteB;
-    const otherWithOctave = question.familyA === question.targetNote
-      ? question.noteB
-      : question.noteA;
+    // Keep same notes but swap order 80% of the time
+    const shouldSwap = Math.random() < RETRY_SWAP_CHANCE;
 
-    const [first, second] = randomizeOrder(
-      { note: targetWithOctave, family: question.targetNote },
-      { note: otherWithOctave, family: question.otherNote }
-    );
+    const [first, second] = shouldSwap
+      ? [
+          { note: question.noteB, family: question.familyB },
+          { note: question.noteA, family: question.familyA },
+        ]
+      : [
+          { note: question.noteA, family: question.familyA },
+          { note: question.noteB, family: question.familyB },
+        ];
 
     question = {
       questionType: "two-note",
