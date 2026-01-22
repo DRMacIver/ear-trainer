@@ -231,6 +231,86 @@ export function isCandidateReadyByStreak(
 }
 
 /**
+ * Count how many questions have been asked for each target note.
+ * Used to select the least practiced note.
+ */
+export function getTargetQuestionCounts(
+  state: ToneQuizState
+): Record<FullTone, number> {
+  const counts: Partial<Record<FullTone, number>> = {};
+  for (const target of state.learningVocabulary) {
+    counts[target as FullTone] = 0;
+    const targetPerf = state.performance[target];
+    if (targetPerf) {
+      for (const other of Object.keys(targetPerf)) {
+        counts[target as FullTone]! += targetPerf[other].length;
+      }
+    }
+  }
+  return counts as Record<FullTone, number>;
+}
+
+/**
+ * Select the least practiced note from vocabulary.
+ * Breaks ties randomly.
+ */
+export function selectLeastPracticedNote(state: ToneQuizState): FullTone {
+  const counts = getTargetQuestionCounts(state);
+  const vocab = state.learningVocabulary;
+
+  let minCount = Infinity;
+  let candidates: FullTone[] = [];
+
+  for (const note of vocab) {
+    const count = counts[note] ?? 0;
+    if (count < minCount) {
+      minCount = count;
+      candidates = [note];
+    } else if (count === minCount) {
+      candidates.push(note);
+    }
+  }
+
+  return candidates[Math.floor(Math.random() * candidates.length)];
+}
+
+/**
+ * Get the maximum distance between any two notes (half the scale, rounded down).
+ */
+function getMaxNoteDistance(): number {
+  return Math.floor(FULL_TONES.length / 2); // 3 for 7 notes
+}
+
+/**
+ * Get all unlocked distances for a target note.
+ * Starts with max distance, unlocks closer distances as user becomes familiar.
+ */
+export function getUnlockedDistances(
+  state: ToneQuizState,
+  target: FullTone
+): number[] {
+  const maxDist = getMaxNoteDistance();
+  const unlocked: number[] = [maxDist]; // Always allow max distance
+
+  // Check if familiar with all notes at each distance, starting from max
+  for (let dist = maxDist; dist > 1; dist--) {
+    const notesAtDist = FULL_TONES.filter(
+      (n) => n !== target && getNoteDistance(target, n) === dist
+    );
+    const allFamiliar = notesAtDist.every((n) =>
+      isFamiliarWith(state, target, n)
+    );
+    if (allFamiliar) {
+      unlocked.push(dist - 1);
+    } else {
+      break; // Stop unlocking if not all familiar at this distance
+    }
+  }
+
+  return unlocked;
+}
+
+/**
  * Check if the user is familiar with distinguishing target from other.
  */
 export function isFamiliarWith(
@@ -651,111 +731,51 @@ export function recordQuestion(
 }
 
 /**
- * Check if note `a` is higher than note `b` in chromatic order.
- */
-function isHigherNote(a: FullTone, b: FullTone): boolean {
-  return FULL_TONES.indexOf(a) > FULL_TONES.indexOf(b);
-}
-
-/**
- * Select from candidates using distance-weighted random selection.
- * Candidates should already be sorted by distance (farthest first).
- */
-function selectWeighted(candidates: FullTone[]): FullTone {
-  if (candidates.length === 0) {
-    throw new Error("No candidates to select from");
-  }
-  if (candidates.length === 1) {
-    return candidates[0];
-  }
-  // Weight by position (farther = more likely)
-  const weights = candidates.map((_, idx) => idx + 1);
-  const totalWeight = weights.reduce((a, b) => a + b, 0);
-  let random = Math.random() * totalWeight;
-  for (let j = 0; j < candidates.length; j++) {
-    random -= weights[j];
-    if (random <= 0) {
-      return candidates[j];
-    }
-  }
-  return candidates[candidates.length - 1];
-}
-
-/** Probability of selecting an unfamiliar vocab neighbor to unlock single-note questions */
-const VOCAB_NEIGHBOR_PRIORITY_CHANCE = 0.3;
-
-/**
  * Select an "other" note for a question about the target.
- * Prioritizes vocab neighbors to unlock single-note questions.
- * Ensures 50% higher / 50% lower to prevent pitch-based guessing.
- * 20% chance to select the next candidate note (for introduction testing).
+ * - 50% chance to pick from vocab, 50% from all notes
+ * - Only picks notes at unlocked distances (starts far, gets closer as user improves)
+ * - 20% chance to select the next candidate note (for introduction testing)
  */
 export function selectOtherNote(
   state: ToneQuizState,
   target: FullTone
 ): FullTone {
-  // 30% chance to prioritize unfamiliar vocab neighbors
-  // This helps unlock single-note questions (which require vocab neighbor familiarity)
-  if (Math.random() < VOCAB_NEIGHBOR_PRIORITY_CHANCE) {
-    const [lowerVocab, upperVocab] = getAdjacentNotesInVocabulary(
-      target,
-      state.learningVocabulary
-    );
-    const unfamiliarVocabNeighbors: FullTone[] = [];
-    if (lowerVocab && !isFamiliarWith(state, target, lowerVocab)) {
-      unfamiliarVocabNeighbors.push(lowerVocab);
-    }
-    if (
-      upperVocab &&
-      upperVocab !== lowerVocab &&
-      !isFamiliarWith(state, target, upperVocab)
-    ) {
-      unfamiliarVocabNeighbors.push(upperVocab);
-    }
-    if (unfamiliarVocabNeighbors.length > 0) {
-      // Pick randomly from unfamiliar vocab neighbors
-      return unfamiliarVocabNeighbors[
-        Math.floor(Math.random() * unfamiliarVocabNeighbors.length)
-      ];
-    }
-  }
-
-  // 20% chance to select the next candidate note (if one exists)
+  // 20% chance to select the next candidate note (for introduction testing)
   const candidate = getNextNoteToLearn(state);
-  if (candidate && candidate !== target && Math.random() < CANDIDATE_SELECTION_CHANCE) {
+  if (
+    candidate &&
+    candidate !== target &&
+    Math.random() < CANDIDATE_SELECTION_CHANCE
+  ) {
     return candidate;
   }
 
-  // First decide: should the other note be higher or lower?
-  const wantHigher = Math.random() < 0.5;
+  // Get unlocked distances for this target
+  const unlocked = getUnlockedDistances(state, target);
 
-  // Split notes into higher and lower groups
-  const allOthers = FULL_TONES.filter((n) => n !== target);
-  const higherNotes = allOthers.filter((n) => isHigherNote(n, target));
-  const lowerNotes = allOthers.filter((n) => !isHigherNote(n, target));
+  // 50% chance to pick from vocab, 50% from all notes
+  const useVocab = Math.random() < 0.5;
+  const pool = useVocab
+    ? state.learningVocabulary.filter((n) => n !== target)
+    : FULL_TONES.filter((n) => n !== target);
 
-  // Pick the group we want, fall back to the other if empty
-  let pool = wantHigher ? higherNotes : lowerNotes;
-  if (pool.length === 0) {
-    pool = wantHigher ? lowerNotes : higherNotes;
-  }
-
-  // Sort by distance from target (farthest first)
-  pool = [...pool].sort(
-    (a, b) => getNoteDistance(target, b) - getNoteDistance(target, a)
+  // Filter to only notes at unlocked distances
+  const available = pool.filter((n) =>
+    unlocked.includes(getNoteDistance(target, n))
   );
 
-  // Find the closest note we're NOT yet familiar with
-  for (let i = pool.length - 1; i >= 0; i--) {
-    if (!isFamiliarWith(state, target, pool[i])) {
-      // Return a note at this distance or farther (with some randomness)
-      const candidates = pool.slice(0, i + 1);
-      return selectWeighted(candidates);
-    }
+  if (available.length > 0) {
+    return available[Math.floor(Math.random() * available.length)];
   }
 
-  // Familiar with all in this direction - pick randomly from pool
-  return pool[Math.floor(Math.random() * pool.length)];
+  // Fallback: if nothing available at unlocked distances, use any from pool
+  if (pool.length > 0) {
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
+  // Ultimate fallback: any note except target
+  const fallback = FULL_TONES.filter((n) => n !== target);
+  return fallback[Math.floor(Math.random() * fallback.length)];
 }
 
 /**
@@ -809,14 +829,14 @@ export function selectTargetNote(
 
   // Pick a new target from vocabulary
   // If we just introduced a note, that should be the target
-  // Otherwise, bias towards notes that aren't fully familiar yet
+  // Otherwise, pick the least practiced note
   let newTarget: FullTone;
   if (introducedNote) {
     newTarget = introducedNote;
   } else {
-    const unfamiliar = newVocabulary.filter((n) => !isNoteFamiliar(state, n));
-    const candidates = unfamiliar.length > 0 ? unfamiliar : newVocabulary;
-    newTarget = candidates[Math.floor(Math.random() * candidates.length)];
+    // Use a temporary state with updated vocabulary for counting
+    const tempState = { ...state, learningVocabulary: newVocabulary };
+    newTarget = selectLeastPracticedNote(tempState);
   }
   const newOctave = pickOctave(newTarget);
 

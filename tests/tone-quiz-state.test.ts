@@ -28,6 +28,9 @@ import {
   getReadySingleNotePairs,
   areAllVocabSingleNotesFamiliar,
   selectSingleNotePair,
+  getTargetQuestionCounts,
+  selectLeastPracticedNote,
+  getUnlockedDistances,
   Grade,
   FullTone,
   FULL_TONES,
@@ -478,6 +481,128 @@ describe("selectOtherNote", () => {
     const state = loadState();
     const other = selectOtherNote(state, "C");
     expect(FULL_TONES).toContain(other);
+  });
+});
+
+describe("getTargetQuestionCounts", () => {
+  beforeEach(() => {
+    localStorageMock.clear();
+  });
+
+  it("returns zero counts for notes with no questions", () => {
+    const state = loadState();
+    const counts = getTargetQuestionCounts(state);
+    expect(counts["C"]).toBe(0);
+    expect(counts["G"]).toBe(0);
+  });
+
+  it("counts questions from performance data", () => {
+    let state = loadState();
+    state.performance = {
+      C: {
+        G: [true, false, true], // 3 questions
+        D: [true, true], // 2 questions
+      },
+      G: {
+        C: [true], // 1 question
+      },
+    };
+    const counts = getTargetQuestionCounts(state);
+    expect(counts["C"]).toBe(5); // 3 + 2
+    expect(counts["G"]).toBe(1);
+  });
+});
+
+describe("selectLeastPracticedNote", () => {
+  beforeEach(() => {
+    localStorageMock.clear();
+  });
+
+  it("selects note with fewest questions", () => {
+    let state = loadState();
+    state.performance = {
+      C: {
+        G: [true, true, true, true, true], // 5 questions
+      },
+      // G has 0 questions
+    };
+    const selected = selectLeastPracticedNote(state);
+    expect(selected).toBe("G");
+  });
+
+  it("breaks ties randomly", () => {
+    const state = loadState();
+    // Both C and G have 0 questions
+    const results = new Set<string>();
+    for (let i = 0; i < 50; i++) {
+      results.add(selectLeastPracticedNote(state));
+    }
+    // Should select both at some point
+    expect(results.has("C")).toBe(true);
+    expect(results.has("G")).toBe(true);
+  });
+});
+
+describe("getUnlockedDistances", () => {
+  beforeEach(() => {
+    localStorageMock.clear();
+  });
+
+  it("always includes max distance (3)", () => {
+    const state = loadState();
+    const unlocked = getUnlockedDistances(state, "C");
+    expect(unlocked).toContain(3);
+  });
+
+  it("only includes max distance when not familiar with any", () => {
+    const state = loadState();
+    const unlocked = getUnlockedDistances(state, "C");
+    expect(unlocked).toEqual([3]);
+  });
+
+  it("unlocks distance 2 when familiar with all at distance 3", () => {
+    let state = loadState();
+    // C's distance-3 notes are F and G
+    state.performance = {
+      C: {
+        F: [true, true, true, true],
+        G: [true, true, true, true],
+      },
+    };
+    const unlocked = getUnlockedDistances(state, "C");
+    expect(unlocked).toContain(3);
+    expect(unlocked).toContain(2);
+  });
+
+  it("unlocks distance 1 when familiar with distances 3 and 2", () => {
+    let state = loadState();
+    // C's distance-3 notes are F and G
+    // C's distance-2 notes are E and A
+    state.performance = {
+      C: {
+        F: [true, true, true, true],
+        G: [true, true, true, true],
+        E: [true, true, true, true],
+        A: [true, true, true, true],
+      },
+    };
+    const unlocked = getUnlockedDistances(state, "C");
+    expect(unlocked).toContain(3);
+    expect(unlocked).toContain(2);
+    expect(unlocked).toContain(1);
+  });
+
+  it("does not unlock closer distance if not familiar with all at current", () => {
+    let state = loadState();
+    // Only familiar with F (distance 3), not G
+    state.performance = {
+      C: {
+        F: [true, true, true, true],
+        // G is missing
+      },
+    };
+    const unlocked = getUnlockedDistances(state, "C");
+    expect(unlocked).toEqual([3]);
   });
 });
 
