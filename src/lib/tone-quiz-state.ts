@@ -24,8 +24,6 @@ const FAMILIARITY_THRESHOLD = 3;
 /** Number of consecutive correct answers needed to move to next target */
 export const STREAK_LENGTH = 3;
 
-/** Probability of selecting the next candidate note as "other" */
-const CANDIDATE_SELECTION_CHANCE = 0.2;
 /** Consecutive correct needed against each closest note to introduce candidate */
 const CANDIDATE_STREAK_THRESHOLD = 5;
 /** Maximum questions without introduction before forcing it */
@@ -732,29 +730,29 @@ export function recordQuestion(
 
 /**
  * Select an "other" note for a question about the target.
- * - 50% chance to pick from vocab, 50% from all notes
+ * - 45% chance to pick from vocab
+ * - 10% chance to pick next candidate note (for introduction testing)
+ * - 45% chance to pick from full pool
  * - Only picks notes at unlocked distances (starts far, gets closer as user improves)
- * - 20% chance to select the next candidate note (for introduction testing)
  */
 export function selectOtherNote(
   state: ToneQuizState,
   target: FullTone
 ): FullTone {
-  // 20% chance to select the next candidate note (for introduction testing)
-  const candidate = getNextNoteToLearn(state);
-  if (
-    candidate &&
-    candidate !== target &&
-    Math.random() < CANDIDATE_SELECTION_CHANCE
-  ) {
-    return candidate;
-  }
-
   // Get unlocked distances for this target
   const unlocked = getUnlockedDistances(state, target);
 
-  // 50% chance to pick from vocab, 50% from all notes
-  const useVocab = Math.random() < 0.5;
+  // Roll for pool selection: 45% vocab, 10% candidate, 45% full
+  const roll = Math.random();
+  const candidate = getNextNoteToLearn(state);
+
+  // 10% chance for candidate note (between 0.45 and 0.55)
+  if (roll >= 0.45 && roll < 0.55 && candidate && candidate !== target) {
+    return candidate;
+  }
+
+  // 45% vocab (0-0.45), 45% full pool (0.55-1.0)
+  const useVocab = roll < 0.45;
   const pool = useVocab
     ? state.learningVocabulary.filter((n) => n !== target)
     : FULL_TONES.filter((n) => n !== target);
