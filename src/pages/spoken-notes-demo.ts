@@ -137,7 +137,7 @@ export function renderSpokenNotesDemo(): void {
           scaleInterval = null;
         }
       }
-    }, 3500); // 3s note + 0.5s gap
+    }, 800); // ~0.5s note + 0.3s gap
   }
 
   // Event listeners
