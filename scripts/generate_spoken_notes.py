@@ -24,8 +24,8 @@ NOTE_FREQUENCIES = {
     "B": 493.88,
 }
 
-# Average pitch of espeak voice (roughly)
-ESPEAK_BASE_PITCH = 170.0  # Hz, approximate fundamental of espeak en-us voice
+# Average pitch of espeak voice (measured)
+ESPEAK_BASE_PITCH = 87.5  # Hz, measured from espeak en-us voice
 
 # C Major scale notes in order
 C_MAJOR_SCALE = ["C", "D", "E", "F", "G", "A", "B"]
@@ -93,6 +93,51 @@ def freq_to_semitones(from_freq: float, to_freq: float) -> float:
     return 12 * np.log2(to_freq / from_freq)
 
 
+def trim_silence(audio: np.ndarray, threshold: float = 0.01) -> np.ndarray:
+    """Trim leading and trailing silence from audio."""
+    nonzero = np.where(np.abs(audio) > threshold)[0]
+    if len(nonzero) == 0:
+        return audio
+    # Add small padding
+    start = max(0, nonzero[0] - 100)
+    end = min(len(audio), nonzero[-1] + 100)
+    return audio[start:end]
+
+
+def measure_pitch(audio: np.ndarray, sr: int) -> float:
+    """Measure the fundamental frequency of audio using autocorrelation."""
+    # Use middle section
+    window_size = min(int(0.1 * sr), len(audio) // 2)
+    start = len(audio) // 2 - window_size // 2
+    segment = audio[start:start + window_size]
+
+    # Remove DC and normalize
+    segment = segment - np.mean(segment)
+    if np.max(np.abs(segment)) > 0:
+        segment = segment / np.max(np.abs(segment))
+
+    # Autocorrelation
+    corr = np.correlate(segment, segment, mode='full')
+    corr = corr[len(corr) // 2:]
+
+    # Find first significant peak (skip very short periods)
+    min_period = int(sr / 500)  # 500 Hz max
+    max_period = int(sr / 50)   # 50 Hz min
+
+    if max_period > len(corr):
+        max_period = len(corr) - 1
+
+    search_region = corr[min_period:max_period]
+    if len(search_region) == 0:
+        return 0.0
+
+    peak_idx = np.argmax(search_region) + min_period
+    if corr[peak_idx] <= 0:
+        return 0.0
+
+    return sr / peak_idx
+
+
 def generate_spoken_note(
     note: str,
     output_path: Path,
@@ -110,9 +155,15 @@ def generate_spoken_note(
         tts_path = tmp / "tts.wav"
         generate_tts(note, tts_path)
 
-        # Load to check duration and get sample rate
+        # Load and trim silence
         audio, sr = sf.read(tts_path)
-        current_duration = len(audio) / sr
+
+        # Trim silence before calculating stretch ratio
+        audio_trimmed = trim_silence(audio)
+        sf.write(tts_path, audio_trimmed, sr)
+
+        current_duration = len(audio_trimmed) / sr
+        print(f"    Original: {len(audio)/sr:.2f}s, Trimmed: {current_duration:.2f}s")
 
         # Step 2: Time stretch to target duration
         stretch_ratio = duration / current_duration
@@ -120,8 +171,16 @@ def generate_spoken_note(
         time_stretch_rubberband(tts_path, stretched_path, stretch_ratio)
 
         # Step 3: Pitch shift to target frequency
-        # Calculate semitones from espeak's base pitch to target
-        semitones = freq_to_semitones(ESPEAK_BASE_PITCH, freq)
+        # Measure actual pitch of stretched audio
+        stretched_audio, stretched_sr = sf.read(stretched_path)
+        measured_pitch = measure_pitch(stretched_audio, stretched_sr)
+        if measured_pitch <= 0:
+            measured_pitch = ESPEAK_BASE_PITCH  # Fallback
+        print(f"    Measured pitch: {measured_pitch:.1f} Hz")
+
+        # Calculate semitones from measured pitch to target
+        semitones = freq_to_semitones(measured_pitch, freq)
+        print(f"    Shift: {semitones:+.1f} semitones")
         shifted_path = tmp / "shifted.wav"
         pitch_shift_rubberband(stretched_path, shifted_path, semitones)
 
