@@ -6,6 +6,7 @@
  */
 
 const C_MAJOR_SCALE = ["C", "D", "E", "F", "G", "A", "B"] as const;
+const OCTAVE = 3; // Using octave 3 recordings
 
 export function renderSpokenNotesDemo(): void {
   const app = document.getElementById("app")!;
@@ -111,7 +112,7 @@ export function renderSpokenNotesDemo(): void {
       btn.classList.add("playing");
     }
 
-    currentAudio = new Audio(`/audio/spoken-notes/${note}4.wav`);
+    currentAudio = new Audio(`/audio/spoken-notes/${note}${OCTAVE}.wav`);
     currentAudio.addEventListener("ended", () => {
       if (btn) {
         btn.classList.remove("playing");
