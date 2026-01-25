@@ -1,31 +1,41 @@
 /**
- * Demo page for spoken note audio files.
+ * Demo page for solfege audio samples.
  *
- * Plays autotuned note names - each note name (C, D, E, etc.) is spoken
- * at the actual pitch of that note.
+ * Uses samples from https://github.com/wcgbg/solfege-samples (GPL-3.0)
+ * Katy voice bank - high quality female voice singing solfege syllables.
  */
 
-const C_MAJOR_SCALE = ["C", "D", "E", "F", "G", "A", "B"] as const;
-const OCTAVE = 3; // Using octave 3 recordings
+// Map note names to MIDI numbers and solfege syllables
+const NOTE_DATA = [
+  { note: "C", midi: 60, solfege: "do" },
+  { note: "D", midi: 62, solfege: "re" },
+  { note: "E", midi: 64, solfege: "mi" },
+  { note: "F", midi: 65, solfege: "fa" },
+  { note: "G", midi: 67, solfege: "so" },
+  { note: "A", midi: 69, solfege: "la" },
+  { note: "B", midi: 71, solfege: "ti" },
+  { note: "C5", midi: 72, solfege: "do", octave: 5 },
+] as const;
 
-export function renderSpokenNotesDemo(): void {
+export function renderSolfegeDemo(): void {
   const app = document.getElementById("app")!;
 
   app.innerHTML = `
-    <h1>Spoken Notes Demo</h1>
+    <h1>Solfege Demo</h1>
     <p><a href="#/">← Back to index</a></p>
 
     <p>
-      Each button plays the note name spoken at that note's pitch.
-      For example, "C" is spoken at 261.63 Hz (C4).
+      Each button plays a sung solfege syllable at that note's pitch.
+      Samples from <a href="https://github.com/wcgbg/solfege-samples">wcgbg/solfege-samples</a> (GPL-3.0).
     </p>
 
-    <div class="spoken-notes-controls">
+    <div class="solfege-controls">
       <div class="note-buttons">
-        ${C_MAJOR_SCALE.map(
-          (note) => `
+        ${NOTE_DATA.map(
+          ({ note, solfege }) => `
           <button class="note-btn" data-note="${note}">
-            ${note}
+            <span class="note-name">${note}</span>
+            <span class="solfege-name">${solfege}</span>
           </button>
         `
         ).join("")}
@@ -38,7 +48,7 @@ export function renderSpokenNotesDemo(): void {
     </div>
 
     <style>
-      .spoken-notes-controls {
+      .solfege-controls {
         margin-top: 2rem;
       }
 
@@ -50,14 +60,27 @@ export function renderSpokenNotesDemo(): void {
       }
 
       .note-btn {
-        font-size: 1.5rem;
-        padding: 1rem 1.5rem;
+        font-size: 1.2rem;
+        padding: 0.75rem 1rem;
         min-width: 4rem;
         cursor: pointer;
         border: 2px solid #333;
         border-radius: 8px;
         background: #f0f0f0;
         transition: all 0.1s;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.25rem;
+      }
+
+      .note-btn .note-name {
+        font-weight: bold;
+      }
+
+      .note-btn .solfege-name {
+        font-size: 0.9rem;
+        color: #666;
       }
 
       .note-btn:hover {
@@ -68,6 +91,10 @@ export function renderSpokenNotesDemo(): void {
         background: #4CAF50;
         color: white;
         border-color: #45a049;
+      }
+
+      .note-btn.playing .solfege-name {
+        color: rgba(255, 255, 255, 0.8);
       }
 
       .playback-controls {
@@ -105,6 +132,9 @@ export function renderSpokenNotesDemo(): void {
   function playNote(note: string): void {
     stopPlayback();
 
+    const noteInfo = NOTE_DATA.find((n) => n.note === note);
+    if (!noteInfo) return;
+
     const btn = document.querySelector(
       `.note-btn[data-note="${note}"]`
     ) as HTMLButtonElement;
@@ -112,7 +142,8 @@ export function renderSpokenNotesDemo(): void {
       btn.classList.add("playing");
     }
 
-    currentAudio = new Audio(`/audio/spoken-notes/${note}${OCTAVE}.wav`);
+    const filename = `note${String(noteInfo.midi).padStart(3, "0")}-${noteInfo.solfege}.wav`;
+    currentAudio = new Audio(`/audio/solfege/${filename}`);
     currentAudio.addEventListener("ended", () => {
       if (btn) {
         btn.classList.remove("playing");
@@ -126,19 +157,19 @@ export function renderSpokenNotesDemo(): void {
     stopPlayback();
 
     let index = 0;
-    playNote(C_MAJOR_SCALE[index]);
+    playNote(NOTE_DATA[index].note);
 
     scaleInterval = window.setInterval(() => {
       index++;
-      if (index < C_MAJOR_SCALE.length) {
-        playNote(C_MAJOR_SCALE[index]);
+      if (index < NOTE_DATA.length) {
+        playNote(NOTE_DATA[index].note);
       } else {
         if (scaleInterval !== null) {
           clearInterval(scaleInterval);
           scaleInterval = null;
         }
       }
-    }, 800); // ~0.5s note + 0.3s gap
+    }, 600);
   }
 
   // Event listeners
