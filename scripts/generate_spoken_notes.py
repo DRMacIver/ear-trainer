@@ -2,9 +2,8 @@
 """
 Generate spoken note names autotuned to their corresponding pitches.
 
-Each note name (C, D, E, etc.) is spoken and pitch-shifted to match
-the actual frequency of that note, creating an audio association
-between the name and the pitch.
+Uses a vocoder-style approach: extracts the spectral envelope from speech
+and applies it to a carrier wave at the target frequency.
 """
 
 import subprocess
@@ -12,8 +11,6 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
-import parselmouth
-from parselmouth.praat import call
 import soundfile as sf
 
 
@@ -38,7 +35,7 @@ def generate_tts(text: str, output_path: Path, rate: int = 80) -> None:
         [
             "espeak-ng",
             "-v", "en-us",
-            "-s", str(rate),  # Slower speech rate for drawn out effect
+            "-s", str(rate),
             "-w", str(output_path),
             text,
         ],
@@ -47,67 +44,87 @@ def generate_tts(text: str, output_path: Path, rate: int = 80) -> None:
     )
 
 
-def autotune_to_pitch(sound: parselmouth.Sound, target_freq: float) -> parselmouth.Sound:
+def vocoder_resynth(
+    speech: np.ndarray,
+    sr: int,
+    target_freq: float,
+    target_duration: float,
+) -> np.ndarray:
     """
-    Autotune audio to a specific frequency using Praat's PSOLA.
-
-    This manipulates the pitch contour to be a constant frequency
-    while preserving formants and timing.
+    Vocoder-style resynthesis: extract envelope from speech,
+    apply to a carrier wave at target frequency.
     """
-    # Create manipulation object
-    manipulation = call(sound, "To Manipulation", 0.01, 75, 600)
+    # Generate carrier wave at target frequency for full duration
+    n_samples = int(target_duration * sr)
+    t = np.arange(n_samples) / sr
 
-    # Extract pitch tier
-    pitch_tier = call(manipulation, "Extract pitch tier")
+    # Use a richer carrier - fundamental + harmonics for more voice-like timbre
+    carrier = np.zeros(n_samples)
+    for harmonic in range(1, 8):
+        amp = 1.0 / harmonic  # Decreasing amplitude for higher harmonics
+        carrier += amp * np.sin(2 * np.pi * target_freq * harmonic * t)
+    carrier = carrier / np.max(np.abs(carrier))
 
-    # Remove all existing pitch points
-    call(pitch_tier, "Remove points between", 0, sound.duration)
+    # Extract amplitude envelope from speech using Hilbert transform approximation
+    # (simple moving RMS for robustness)
+    window_size = int(0.02 * sr)  # 20ms window
+    speech_padded = np.pad(speech, (window_size // 2, window_size // 2), mode='edge')
+    envelope = np.array([
+        np.sqrt(np.mean(speech_padded[i:i + window_size] ** 2))
+        for i in range(len(speech))
+    ])
 
-    # Add constant pitch at target frequency
-    call(pitch_tier, "Add point", 0.0, target_freq)
-    call(pitch_tier, "Add point", sound.duration, target_freq)
+    # Smooth the envelope
+    smooth_window = int(0.01 * sr)
+    if smooth_window > 1:
+        kernel = np.ones(smooth_window) / smooth_window
+        envelope = np.convolve(envelope, kernel, mode='same')
 
-    # Replace pitch tier
-    call([manipulation, pitch_tier], "Replace pitch tier")
+    # Stretch envelope to target duration
+    envelope_stretched = np.interp(
+        np.linspace(0, len(envelope) - 1, n_samples),
+        np.arange(len(envelope)),
+        envelope
+    )
 
-    # Resynthesize using PSOLA
-    result = call(manipulation, "Get resynthesis (overlap-add)")
+    # Apply envelope to carrier
+    output = carrier * envelope_stretched
 
-    return result
+    # Add subtle attack from original consonant
+    # Blend in the first ~50ms of original speech for consonant clarity
+    consonant_samples = min(int(0.08 * sr), len(speech))
+    blend_region = int(0.15 * sr)  # Crossfade region
 
+    if consonant_samples > 0 and blend_region < n_samples:
+        # Pitch-shift the consonant region to target frequency
+        # For simplicity, just use the original (consonants are mostly noise anyway)
+        consonant = speech[:consonant_samples]
 
-def time_stretch_praat(sound: parselmouth.Sound, target_duration: float) -> parselmouth.Sound:
-    """Time-stretch audio to a target duration using Praat."""
-    current_duration = sound.duration
-    ratio = target_duration / current_duration
+        # Pad consonant to blend_region if needed
+        if len(consonant) < blend_region:
+            consonant = np.pad(consonant, (0, blend_region - len(consonant)))
+        else:
+            consonant = consonant[:blend_region]
 
-    if abs(ratio - 1.0) < 0.01:
-        return sound
+        # Create crossfade
+        fade_out = np.linspace(1, 0, blend_region)
+        fade_in = np.linspace(0, 1, blend_region)
 
-    # Use Praat's duration tier manipulation
-    manipulation = call(sound, "To Manipulation", 0.01, 75, 600)
+        # Normalize consonant to similar level
+        consonant_norm = consonant * (np.max(envelope_stretched[:blend_region]) /
+                                       (np.max(np.abs(consonant)) + 1e-10))
 
-    # Create duration tier
-    duration_tier = call(manipulation, "Extract duration tier")
+        output[:blend_region] = (consonant_norm * fade_out +
+                                  output[:blend_region] * fade_in)
 
-    # Remove existing points and add constant stretch
-    call(duration_tier, "Remove points between", 0, current_duration)
-    call(duration_tier, "Add point", 0.0, ratio)
-    call(duration_tier, "Add point", current_duration, ratio)
-
-    # Replace duration tier
-    call([manipulation, duration_tier], "Replace duration tier")
-
-    # Resynthesize
-    result = call(manipulation, "Get resynthesis (overlap-add)")
-
-    return result
+    return output
 
 
 def generate_spoken_note(
     note: str,
     output_path: Path,
     duration: float = 3.0,
+    target_sr: int = 44100,
 ) -> None:
     """Generate a spoken note name autotuned to its pitch."""
     freq = NOTE_FREQUENCIES[note]
@@ -120,41 +137,47 @@ def generate_spoken_note(
         tts_path = tmp / "tts.wav"
         generate_tts(note, tts_path)
 
-        # Load with Praat
-        sound = parselmouth.Sound(str(tts_path))
+        # Load the audio
+        audio, sr = sf.read(tts_path)
 
-        # Step 2: Time stretch first (before pitch modification)
-        stretched = time_stretch_praat(sound, duration)
+        # Convert to mono if stereo
+        if len(audio.shape) > 1:
+            audio = audio.mean(axis=1)
 
-        # Step 3: Autotune to target pitch
-        autotuned = autotune_to_pitch(stretched, freq)
+        # Resample to target SR if needed
+        if sr != target_sr:
+            # Simple resampling via interpolation
+            duration_orig = len(audio) / sr
+            n_samples_new = int(duration_orig * target_sr)
+            audio = np.interp(
+                np.linspace(0, len(audio) - 1, n_samples_new),
+                np.arange(len(audio)),
+                audio
+            )
+            sr = target_sr
 
-        # Convert to numpy for post-processing
-        audio = autotuned.values[0]
-        sr = int(autotuned.sampling_frequency)
+        # Step 2: Vocoder resynthesis
+        output = vocoder_resynth(audio, sr, freq, duration)
 
         # Normalize
-        max_val = np.max(np.abs(audio))
+        max_val = np.max(np.abs(output))
         if max_val > 0:
-            audio = audio / max_val * 0.9
+            output = output / max_val * 0.8
 
-        # Apply fade in/out to avoid clicks
-        fade_samples = int(0.05 * sr)  # 50ms fade
-        if len(audio) > 2 * fade_samples:
-            fade_in = np.linspace(0, 1, fade_samples)
-            fade_out = np.linspace(1, 0, fade_samples)
-            audio[:fade_samples] *= fade_in
-            audio[-fade_samples:] *= fade_out
+        # Apply fade in/out
+        fade_samples = int(0.05 * sr)
+        if len(output) > 2 * fade_samples:
+            output[:fade_samples] *= np.linspace(0, 1, fade_samples)
+            output[-fade_samples:] *= np.linspace(1, 0, fade_samples)
 
         # Save
-        sf.write(output_path, audio.astype(np.float32), sr)
+        sf.write(output_path, output.astype(np.float32), sr)
 
     print(f"  Saved to {output_path}")
 
 
 def main() -> None:
     """Generate spoken notes for the C Major scale."""
-    # Output directory
     output_dir = Path(__file__).parent.parent / "public" / "audio" / "spoken-notes"
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -176,9 +199,7 @@ def main() -> None:
         generate_spoken_note(note, output_path, duration=3.0)
 
     print()
-    print("Done! Generated files:")
-    for note in C_MAJOR_SCALE:
-        print(f"  {output_dir / f'{note}4.wav'}")
+    print("Done!")
 
 
 if __name__ == "__main__":
