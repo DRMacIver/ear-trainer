@@ -29,6 +29,13 @@ RUN apt-get update && apt-get install -y \
     locales \
     && rm -rf /var/lib/apt/lists/*
 
+# Install audio generation dependencies (for scripts/generate_spoken_notes.py)
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    espeak-ng \
+    rubberband-cli \
+    && rm -rf /var/lib/apt/lists/*
+
 # Set up locale
 RUN locale-gen en_US.UTF-8
 ENV LANG=en_US.UTF-8
