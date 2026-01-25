@@ -1,22 +1,20 @@
 #!/usr/bin/env python3
 """
-Generate spoken note names autotuned to their corresponding pitches.
+Generate sung note names using formant synthesis.
 
-Uses librosa for pitch detection and psola for pitch shifting.
-Based on: https://thewolfsound.com/how-to-auto-tune-your-voice-with-python/
+Creates vowel sounds at the target pitch with consonant onsets.
 """
 
 import subprocess
 import tempfile
 from pathlib import Path
 
-import librosa
 import numpy as np
-import psola
 import soundfile as sf
+from scipy import signal
 
 
-# Note frequencies for octave 4 (A4 = 440 Hz, equal temperament)
+# Note frequencies for octave 4
 NOTE_FREQUENCIES = {
     "C": 261.63,
     "D": 293.66,
@@ -27,114 +25,212 @@ NOTE_FREQUENCIES = {
     "B": 493.88,
 }
 
+# Vowel formants (F1, F2, F3) in Hz - approximate values
+# Source: https://en.wikipedia.org/wiki/Formant
+VOWEL_FORMANTS = {
+    "ee": (270, 2300, 3000),   # as in "see", "bee", "C", "D", "E", "G", "B"
+    "ay": (660, 1700, 2400),   # as in "A"
+    "eh": (530, 1850, 2500),   # as in "F" (ef)
+}
+
+# Which vowel each note uses
+NOTE_VOWELS = {
+    "C": "ee",  # "see"
+    "D": "ee",  # "dee"
+    "E": "ee",  # "ee"
+    "F": "eh",  # "ef"
+    "G": "ee",  # "jee"
+    "A": "ay",  # "ay"
+    "B": "ee",  # "bee"
+}
+
 C_MAJOR_SCALE = ["C", "D", "E", "F", "G", "A", "B"]
 
 
-def generate_tts(text: str, output_path: Path) -> None:
-    """Generate speech audio using espeak-ng."""
-    subprocess.run(
-        [
-            "espeak-ng",
-            "-v", "en-us",
-            "-s", "120",
-            "-w", str(output_path),
-            text,
-        ],
-        check=True,
-        capture_output=True,
-    )
-
-
-def autotune_to_pitch(audio: np.ndarray, sr: int, target_freq: float) -> np.ndarray:
+def generate_glottal_source(f0: float, duration: float, sr: int) -> np.ndarray:
     """
-    Autotune audio to a specific target frequency using librosa + psola.
+    Generate a glottal pulse train - the sound source for voiced speech.
+    Uses a simple model with harmonics that roll off naturally.
     """
-    # Detect pitch using PYIN
-    f0, voiced_flag, voiced_probs = librosa.pyin(
-        audio,
-        fmin=librosa.note_to_hz('C2'),
-        fmax=librosa.note_to_hz('C6'),
-        sr=sr,
-    )
+    t = np.arange(int(duration * sr)) / sr
 
-    # Create target pitch array - constant at target frequency where voiced
-    target_f0 = np.where(voiced_flag, target_freq, np.nan)
+    # Generate harmonics with natural roll-off (approx -12dB/octave)
+    source = np.zeros_like(t)
+    for n in range(1, 40):  # Up to 40 harmonics
+        amplitude = 1.0 / (n ** 1.2)  # Roll-off
+        source += amplitude * np.sin(2 * np.pi * f0 * n * t)
 
-    # Where we couldn't detect pitch, use target anyway
-    target_f0 = np.where(np.isnan(f0), target_freq, target_f0)
-
-    # Use psola to shift pitch
-    return psola.vocode(audio, sample_rate=sr, target_pitch=target_f0, fmin=50, fmax=800)
+    return source / np.max(np.abs(source))
 
 
-def trim_silence(audio: np.ndarray, threshold: float = 0.01) -> np.ndarray:
-    """Trim leading and trailing silence."""
-    nonzero = np.where(np.abs(audio) > threshold)[0]
-    if len(nonzero) == 0:
-        return audio
-    start = max(0, nonzero[0] - 100)
-    end = min(len(audio), nonzero[-1] + 100)
-    return audio[start:end]
+def apply_formant_filter(
+    source: np.ndarray,
+    sr: int,
+    formants: tuple[float, float, float],
+    bandwidths: tuple[float, float, float] = (80, 120, 150),
+) -> np.ndarray:
+    """
+    Apply formant filtering using resonant bandpass filters.
+    """
+    output = np.zeros_like(source)
+
+    for freq, bw in zip(formants, bandwidths):
+        if freq >= sr / 2:
+            continue  # Skip if above Nyquist
+
+        # Design a bandpass filter for this formant
+        Q = freq / bw
+        b, a = signal.iirpeak(freq, Q, sr)
+
+        # Apply filter
+        filtered = signal.lfilter(b, a, source)
+        output += filtered
+
+    # Normalize
+    if np.max(np.abs(output)) > 0:
+        output = output / np.max(np.abs(output))
+
+    return output
 
 
-def generate_spoken_note(note: str, output_path: Path, target_sr: int = 44100) -> None:
-    """Generate a spoken note name pitched to its frequency."""
-    freq = NOTE_FREQUENCIES[note]
-    print(f"Generating {note} at {freq:.2f} Hz...")
+def generate_vowel(
+    f0: float,
+    vowel: str,
+    duration: float,
+    sr: int,
+) -> np.ndarray:
+    """Generate a synthetic vowel at the given fundamental frequency."""
+    # Generate glottal source
+    source = generate_glottal_source(f0, duration, sr)
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tmp = Path(tmpdir)
+    # Apply formant filtering
+    formants = VOWEL_FORMANTS[vowel]
+    vowel_audio = apply_formant_filter(source, sr, formants)
 
-        # Generate TTS
-        tts_path = tmp / "tts.wav"
-        generate_tts(note, tts_path)
+    # Apply amplitude envelope (attack, sustain, release)
+    n_samples = len(vowel_audio)
+    attack = int(0.05 * sr)   # 50ms attack
+    release = int(0.1 * sr)   # 100ms release
 
-        # Load audio
-        audio, sr = sf.read(tts_path)
-        audio = trim_silence(audio)
-        print(f"    Duration: {len(audio)/sr:.2f}s")
+    envelope = np.ones(n_samples)
+    envelope[:attack] = np.linspace(0, 1, attack)
+    envelope[-release:] = np.linspace(1, 0, release)
 
-        # Autotune to target pitch
-        autotuned = autotune_to_pitch(audio, sr, freq)
+    return vowel_audio * envelope
 
-        # Normalize
-        max_val = np.max(np.abs(autotuned))
-        if max_val > 0:
-            autotuned = autotuned / max_val * 0.8
 
-        # Fade in/out
-        fade_samples = int(0.02 * sr)
-        if len(autotuned) > 2 * fade_samples:
-            autotuned[:fade_samples] *= np.linspace(0, 1, fade_samples)
-            autotuned[-fade_samples:] *= np.linspace(1, 0, fade_samples)
+def get_consonant_from_tts(note: str, sr: int) -> np.ndarray | None:
+    """Extract just the consonant onset from TTS."""
+    # Notes that start with consonants
+    consonant_notes = {"C", "D", "G", "B"}  # s, d, j, b sounds
+
+    if note not in consonant_notes:
+        return None
+
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+        tts_path = f.name
+
+    try:
+        subprocess.run(
+            ["espeak-ng", "-v", "en-us", "-s", "150", "-w", tts_path, note],
+            check=True,
+            capture_output=True,
+        )
+
+        audio, tts_sr = sf.read(tts_path)
 
         # Resample if needed
-        if sr != target_sr:
-            autotuned = librosa.resample(autotuned, orig_sr=sr, target_sr=target_sr)
+        if tts_sr != sr:
+            n_samples = int(len(audio) * sr / tts_sr)
+            audio = np.interp(
+                np.linspace(0, len(audio) - 1, n_samples),
+                np.arange(len(audio)),
+                audio
+            )
 
-        sf.write(output_path, autotuned.astype(np.float32), target_sr)
+        # Extract just the first ~80ms (consonant portion)
+        consonant_duration = int(0.08 * sr)
+        consonant = audio[:consonant_duration]
+
+        # Apply fade out
+        fade_len = int(0.03 * sr)
+        consonant[-fade_len:] *= np.linspace(1, 0, fade_len)
+
+        return consonant
+
+    except Exception:
+        return None
+    finally:
+        Path(tts_path).unlink(missing_ok=True)
+
+
+def generate_sung_note(
+    note: str,
+    output_path: Path,
+    duration: float = 1.5,
+    sr: int = 44100,
+) -> None:
+    """Generate a sung note name."""
+    freq = NOTE_FREQUENCIES[note]
+    vowel = NOTE_VOWELS[note]
+
+    print(f"Generating {note} at {freq:.2f} Hz (vowel: {vowel})...")
+
+    # Generate the vowel
+    vowel_audio = generate_vowel(freq, vowel, duration, sr)
+
+    # Try to get consonant onset
+    consonant = get_consonant_from_tts(note, sr)
+
+    if consonant is not None:
+        # Crossfade consonant into vowel
+        crossfade_len = int(0.02 * sr)
+
+        # Create output array
+        total_len = len(consonant) + len(vowel_audio) - crossfade_len
+        output = np.zeros(total_len)
+
+        # Add consonant
+        output[:len(consonant)] = consonant
+
+        # Crossfade region
+        cf_start = len(consonant) - crossfade_len
+        fade_out = np.linspace(1, 0, crossfade_len)
+        fade_in = np.linspace(0, 1, crossfade_len)
+
+        output[cf_start:cf_start + crossfade_len] *= fade_out
+        output[cf_start:cf_start + crossfade_len] += vowel_audio[:crossfade_len] * fade_in
+
+        # Add rest of vowel
+        output[cf_start + crossfade_len:] = vowel_audio[crossfade_len:total_len - cf_start - crossfade_len + crossfade_len]
+    else:
+        output = vowel_audio
+
+    # Normalize
+    max_val = np.max(np.abs(output))
+    if max_val > 0:
+        output = output / max_val * 0.8
+
+    # Final fade out
+    fade_samples = int(0.05 * sr)
+    output[-fade_samples:] *= np.linspace(1, 0, fade_samples)
+
+    print(f"    Duration: {len(output)/sr:.2f}s")
+    sf.write(output_path, output.astype(np.float32), sr)
     print(f"    Saved to {output_path}")
 
 
 def main() -> None:
-    """Generate spoken notes for the C Major scale."""
+    """Generate sung notes for the C Major scale."""
     output_dir = Path(__file__).parent.parent / "public" / "audio" / "spoken-notes"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Output directory: {output_dir}\n")
-
-    # Check for espeak-ng
-    try:
-        subprocess.run(["espeak-ng", "--version"], capture_output=True, check=True)
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        print("ERROR: espeak-ng not installed")
-        return
-
-    print("Generating C Major scale (octave 4) spoken notes...\n")
+    print("Generating C Major scale (octave 4) synthesized vowels...\n")
 
     for note in C_MAJOR_SCALE:
         output_path = output_dir / f"{note}4.wav"
-        generate_spoken_note(note, output_path)
+        generate_sung_note(note, output_path)
         print()
 
     print("Done!")
