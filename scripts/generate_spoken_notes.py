@@ -25,12 +25,12 @@ NOTE_FREQUENCIES = {
     "B": 493.88,
 }
 
-# Vowel formants (F1, F2, F3) in Hz - approximate values
-# Source: https://en.wikipedia.org/wiki/Formant
+# Vowel formants (F1, F2, F3) in Hz - warmer/lower values for singing
+# Reduced F2/F3 for less shrill sound
 VOWEL_FORMANTS = {
-    "ee": (270, 2300, 3000),   # as in "see", "bee", "C", "D", "E", "G", "B"
-    "ay": (660, 1700, 2400),   # as in "A"
-    "eh": (530, 1850, 2500),   # as in "F" (ef)
+    "ee": (300, 1800, 2500),   # as in "see", "bee" - warmer
+    "ay": (600, 1500, 2200),   # as in "A" - warmer
+    "eh": (500, 1600, 2300),   # as in "F" (ef) - warmer
 }
 
 # Which vowel each note uses
