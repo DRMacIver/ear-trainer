@@ -2,8 +2,7 @@
 """
 Generate spoken note names autotuned to their corresponding pitches.
 
-Uses a vocoder-style approach: extracts the spectral envelope from speech
-and applies it to a carrier wave at the target frequency.
+Uses rubberband for high-quality formant-preserving pitch shifting.
 """
 
 import subprocess
@@ -25,17 +24,23 @@ NOTE_FREQUENCIES = {
     "B": 493.88,
 }
 
+# Average pitch of espeak voice (roughly)
+ESPEAK_BASE_PITCH = 170.0  # Hz, approximate fundamental of espeak en-us voice
+
 # C Major scale notes in order
 C_MAJOR_SCALE = ["C", "D", "E", "F", "G", "A", "B"]
 
 
-def generate_tts(text: str, output_path: Path, rate: int = 80) -> None:
-    """Generate speech audio using espeak-ng."""
+def generate_tts(text: str, output_path: Path, rate: int = 40) -> None:
+    """Generate speech audio using espeak-ng with extended vowel."""
+    # Use phoneme input to extend the vowel sound
+    # Most note names end in "ee" sound
     subprocess.run(
         [
             "espeak-ng",
             "-v", "en-us",
-            "-s", str(rate),
+            "-s", str(rate),  # Very slow for longer sound
+            "-p", "50",  # Default pitch
             "-w", str(output_path),
             text,
         ],
@@ -44,80 +49,48 @@ def generate_tts(text: str, output_path: Path, rate: int = 80) -> None:
     )
 
 
-def vocoder_resynth(
-    speech: np.ndarray,
-    sr: int,
-    target_freq: float,
-    target_duration: float,
-) -> np.ndarray:
-    """
-    Vocoder-style resynthesis: extract envelope from speech,
-    apply to a carrier wave at target frequency.
-    """
-    # Generate carrier wave at target frequency for full duration
-    n_samples = int(target_duration * sr)
-    t = np.arange(n_samples) / sr
-
-    # Use a richer carrier - fundamental + harmonics for more voice-like timbre
-    carrier = np.zeros(n_samples)
-    for harmonic in range(1, 8):
-        amp = 1.0 / harmonic  # Decreasing amplitude for higher harmonics
-        carrier += amp * np.sin(2 * np.pi * target_freq * harmonic * t)
-    carrier = carrier / np.max(np.abs(carrier))
-
-    # Extract amplitude envelope from speech using Hilbert transform approximation
-    # (simple moving RMS for robustness)
-    window_size = int(0.02 * sr)  # 20ms window
-    speech_padded = np.pad(speech, (window_size // 2, window_size // 2), mode='edge')
-    envelope = np.array([
-        np.sqrt(np.mean(speech_padded[i:i + window_size] ** 2))
-        for i in range(len(speech))
-    ])
-
-    # Smooth the envelope
-    smooth_window = int(0.01 * sr)
-    if smooth_window > 1:
-        kernel = np.ones(smooth_window) / smooth_window
-        envelope = np.convolve(envelope, kernel, mode='same')
-
-    # Stretch envelope to target duration
-    envelope_stretched = np.interp(
-        np.linspace(0, len(envelope) - 1, n_samples),
-        np.arange(len(envelope)),
-        envelope
+def pitch_shift_rubberband(
+    input_path: Path,
+    output_path: Path,
+    semitones: float,
+) -> None:
+    """Use rubberband for formant-preserving pitch shift."""
+    subprocess.run(
+        [
+            "rubberband",
+            "-p", str(semitones),  # Pitch shift in semitones
+            "-F",  # Formant preserving mode
+            "-3",  # High quality
+            str(input_path),
+            str(output_path),
+        ],
+        check=True,
+        capture_output=True,
     )
 
-    # Apply envelope to carrier
-    output = carrier * envelope_stretched
 
-    # Add subtle attack from original consonant
-    # Blend in the first ~50ms of original speech for consonant clarity
-    consonant_samples = min(int(0.08 * sr), len(speech))
-    blend_region = int(0.15 * sr)  # Crossfade region
+def time_stretch_rubberband(
+    input_path: Path,
+    output_path: Path,
+    ratio: float,
+) -> None:
+    """Use rubberband for time stretching."""
+    subprocess.run(
+        [
+            "rubberband",
+            "-t", str(ratio),  # Time stretch ratio
+            "-3",  # High quality
+            str(input_path),
+            str(output_path),
+        ],
+        check=True,
+        capture_output=True,
+    )
 
-    if consonant_samples > 0 and blend_region < n_samples:
-        # Pitch-shift the consonant region to target frequency
-        # For simplicity, just use the original (consonants are mostly noise anyway)
-        consonant = speech[:consonant_samples]
 
-        # Pad consonant to blend_region if needed
-        if len(consonant) < blend_region:
-            consonant = np.pad(consonant, (0, blend_region - len(consonant)))
-        else:
-            consonant = consonant[:blend_region]
-
-        # Create crossfade
-        fade_out = np.linspace(1, 0, blend_region)
-        fade_in = np.linspace(0, 1, blend_region)
-
-        # Normalize consonant to similar level
-        consonant_norm = consonant * (np.max(envelope_stretched[:blend_region]) /
-                                       (np.max(np.abs(consonant)) + 1e-10))
-
-        output[:blend_region] = (consonant_norm * fade_out +
-                                  output[:blend_region] * fade_in)
-
-    return output
+def freq_to_semitones(from_freq: float, to_freq: float) -> float:
+    """Calculate semitone difference between two frequencies."""
+    return 12 * np.log2(to_freq / from_freq)
 
 
 def generate_spoken_note(
@@ -133,22 +106,46 @@ def generate_spoken_note(
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
 
-        # Step 1: Generate TTS
+        # Step 1: Generate TTS (slow rate for longer vowel)
         tts_path = tmp / "tts.wav"
         generate_tts(note, tts_path)
 
-        # Load the audio
+        # Load to check duration and get sample rate
         audio, sr = sf.read(tts_path)
+        current_duration = len(audio) / sr
+
+        # Step 2: Time stretch to target duration
+        stretch_ratio = duration / current_duration
+        stretched_path = tmp / "stretched.wav"
+        time_stretch_rubberband(tts_path, stretched_path, stretch_ratio)
+
+        # Step 3: Pitch shift to target frequency
+        # Calculate semitones from espeak's base pitch to target
+        semitones = freq_to_semitones(ESPEAK_BASE_PITCH, freq)
+        shifted_path = tmp / "shifted.wav"
+        pitch_shift_rubberband(stretched_path, shifted_path, semitones)
+
+        # Load result
+        audio, sr = sf.read(shifted_path)
 
         # Convert to mono if stereo
         if len(audio.shape) > 1:
             audio = audio.mean(axis=1)
 
-        # Resample to target SR if needed
+        # Normalize
+        max_val = np.max(np.abs(audio))
+        if max_val > 0:
+            audio = audio / max_val * 0.8
+
+        # Apply fade in/out
+        fade_samples = int(0.05 * sr)
+        if len(audio) > 2 * fade_samples:
+            audio[:fade_samples] *= np.linspace(0, 1, fade_samples)
+            audio[-fade_samples:] *= np.linspace(1, 0, fade_samples)
+
+        # Resample if needed
         if sr != target_sr:
-            # Simple resampling via interpolation
-            duration_orig = len(audio) / sr
-            n_samples_new = int(duration_orig * target_sr)
+            n_samples_new = int(len(audio) * target_sr / sr)
             audio = np.interp(
                 np.linspace(0, len(audio) - 1, n_samples_new),
                 np.arange(len(audio)),
@@ -156,22 +153,8 @@ def generate_spoken_note(
             )
             sr = target_sr
 
-        # Step 2: Vocoder resynthesis
-        output = vocoder_resynth(audio, sr, freq, duration)
-
-        # Normalize
-        max_val = np.max(np.abs(output))
-        if max_val > 0:
-            output = output / max_val * 0.8
-
-        # Apply fade in/out
-        fade_samples = int(0.05 * sr)
-        if len(output) > 2 * fade_samples:
-            output[:fade_samples] *= np.linspace(0, 1, fade_samples)
-            output[-fade_samples:] *= np.linspace(1, 0, fade_samples)
-
         # Save
-        sf.write(output_path, output.astype(np.float32), sr)
+        sf.write(output_path, audio.astype(np.float32), sr)
 
     print(f"  Saved to {output_path}")
 
@@ -184,11 +167,17 @@ def main() -> None:
     print(f"Output directory: {output_dir}")
     print()
 
-    # Check for espeak-ng
+    # Check dependencies
     try:
         subprocess.run(["espeak-ng", "--version"], capture_output=True, check=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
         print("ERROR: espeak-ng not installed. Run: sudo apt install espeak-ng")
+        return
+
+    try:
+        subprocess.run(["rubberband", "--version"], capture_output=True, check=True)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        print("ERROR: rubberband not installed. Run: sudo apt install rubberband-cli")
         return
 
     print("Generating C Major scale (octave 4) spoken notes...")
