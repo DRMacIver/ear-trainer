@@ -22,7 +22,6 @@ Write the session configuration to `.claude/autonomous-session.local.md`.
 ## Work Loop
 
 For each iteration:
-
 1. Check for available issues with `bd ready`
 2. Pick the highest priority issue
 3. Implement the solution

@@ -41,9 +41,5 @@
         ]
       }
     ]
-  },
-  "enabledPlugins": {
-    "claude-reliability@claude-reliability-marketplace": true,
-    "beads@beads-marketplace": true
   }
 }

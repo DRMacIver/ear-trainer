@@ -10,16 +10,3 @@ dist/
 coverage/
 .npm/
 *.tsbuildinfo
-tmp-audio/
-.claude-reliability/
-
-# Added by capability regeneration
-.claude/jkw-session.local.md
-.claude/jkw-state.local.yaml
-.claude/beads-warning-given.local
-
-# claude-reliability managed
-.claude/bin/
-.claude/*.local.md
-.claude/*.local.json
-.claude/*.local

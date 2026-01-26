@@ -5,14 +5,6 @@
  */
 
 import { playNote, selectRandomNotes } from "../audio.js";
-import {
-  HistoryEntry,
-  renderHistorySummary,
-  setupHistoryBackButton,
-  setupHistoryPlayButtons,
-} from "../lib/history.js";
-
-const NOTE_DURATION = 0.8;
 
 interface ExerciseState {
   // The two notes to choose between
@@ -26,10 +18,6 @@ interface ExerciseState {
   // Running score
   correct: number;
   total: number;
-  // Session history
-  history: HistoryEntry[];
-  // Whether showing history view
-  showingHistory: boolean;
 }
 
 let state: ExerciseState;
@@ -46,26 +34,11 @@ function initExercise(preserveScore = false): void {
     wasCorrect: null,
     correct: preserveScore ? state.correct : 0,
     total: preserveScore ? state.total : 0,
-    history: preserveScore ? state.history : [],
-    showingHistory: false,
   };
 }
 
 function render(): void {
   const app = document.getElementById("app")!;
-
-  if (state.showingHistory) {
-    app.innerHTML = renderHistorySummary(state.history, "Note Choice");
-    setupHistoryBackButton(() => {
-      state.showingHistory = false;
-      render();
-      playCurrentNote();
-    });
-    setupHistoryPlayButtons(state.history, async (notes) => {
-      await playNote(notes[0], { duration: NOTE_DURATION });
-    });
-    return;
-  }
 
   app.innerHTML = `
     <a href="#/" class="back-link">&larr; Back to exercises</a>
@@ -75,7 +48,6 @@ function render(): void {
     <div class="exercise-container">
       <div class="controls">
         <button class="play-again-btn" id="play-btn">Play Note</button>
-        <button class="done-button" id="done-btn">Done</button>
       </div>
 
       <div>
@@ -123,12 +95,6 @@ function setupEventListeners(): void {
   const playBtn = document.getElementById("play-btn")!;
   playBtn.addEventListener("click", playCurrentNote);
 
-  const doneBtn = document.getElementById("done-btn")!;
-  doneBtn.addEventListener("click", () => {
-    state.showingHistory = true;
-    render();
-  });
-
   // Clean up previous keyboard handler if any
   if (keyboardHandler) {
     document.removeEventListener("keydown", keyboardHandler);
@@ -162,7 +128,7 @@ function setupEventListeners(): void {
 
 function playCurrentNote(): void {
   const correctNote = state.choices[state.correctIndex];
-  playNote(correctNote, { duration: NOTE_DURATION });
+  playNote(correctNote, { duration: 0.8 });
 }
 
 function nextExercise(): void {
@@ -180,18 +146,6 @@ function handleChoice(chosenIndex: number): void {
   state.hasAnswered = true;
   state.wasCorrect = chosenIndex === state.correctIndex;
   state.total++;
-
-  // Record history
-  const correctNote = state.choices[state.correctIndex];
-  const chosenNote = state.choices[chosenIndex];
-  state.history.push({
-    prompt: correctNote,
-    notes: [correctNote],
-    userAnswer: chosenNote,
-    correctAnswer: correctNote,
-    correct: state.wasCorrect,
-  });
-
   if (state.wasCorrect) {
     state.correct++;
   }
