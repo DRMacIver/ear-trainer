@@ -14,3 +14,9 @@ coverage/
 .beads/sync_base.jsonl
 tmp-audio/
 .claude-reliability/
+
+# claude-reliability managed
+.claude/bin/
+.claude/*.local.md
+.claude/*.local.json
+.claude/*.local
