@@ -39,6 +39,13 @@ const NOTE_INDEX: Record<string, number> = {
   B4: 6,
 };
 
+// Timing constants to match solfege samples (1.75s each)
+const NOTE_DURATION = 1.75; // Match Jennifer sample length
+const SCALE_NOTE_DURATION = 0.8; // For scale runs
+const NOTE_GAP = 300; // Gap between notes in ms
+const SCALE_GAP = 400; // Gap between scale notes in ms
+const TONE_VOLUME = 0.5; // Increased to better match solfege volume
+
 let isRunning = false;
 let currentAudio: HTMLAudioElement | null = null;
 
@@ -92,8 +99,8 @@ async function playTone(
   const fadeOut = fadeOutDuration ?? 0.05;
 
   gainNode.gain.setValueAtTime(0, now);
-  gainNode.gain.linearRampToValueAtTime(0.3, now + 0.01);
-  gainNode.gain.setValueAtTime(0.3, now + duration - fadeOut);
+  gainNode.gain.linearRampToValueAtTime(TONE_VOLUME, now + 0.01);
+  gainNode.gain.setValueAtTime(TONE_VOLUME, now + duration - fadeOut);
   gainNode.gain.linearRampToValueAtTime(0, now + duration);
 
   oscillator.start(now);
@@ -133,10 +140,12 @@ async function playSolfege(note: string): Promise<void> {
 async function playPairAsTones(
   note1: string,
   note2: string,
-  duration: number = 2,
+  duration: number = NOTE_DURATION,
   lastFadeOut?: number
 ): Promise<void> {
   await playTone(note1, duration);
+  if (!isRunning) return;
+  await sleep(NOTE_GAP);
   if (!isRunning) return;
   await playTone(note2, duration, lastFadeOut);
 }
@@ -144,22 +153,28 @@ async function playPairAsTones(
 async function playPairAsSolfege(note1: string, note2: string): Promise<void> {
   await playSolfege(note1);
   if (!isRunning) return;
-  await sleep(300);
+  await sleep(NOTE_GAP);
+  if (!isRunning) return;
   await playSolfege(note2);
 }
 
 async function playScaleAsTones(notes: string[]): Promise<void> {
-  for (const note of notes) {
+  for (let i = 0; i < notes.length; i++) {
     if (!isRunning) return;
-    await playTone(note, 0.5);
+    await playTone(notes[i], SCALE_NOTE_DURATION);
+    if (i < notes.length - 1) {
+      await sleep(SCALE_GAP);
+    }
   }
 }
 
 async function playScaleAsSolfege(notes: string[]): Promise<void> {
-  for (const note of notes) {
+  for (let i = 0; i < notes.length; i++) {
     if (!isRunning) return;
-    await playSolfege(note);
-    await sleep(100);
+    await playSolfege(notes[i]);
+    if (i < notes.length - 1) {
+      await sleep(SCALE_GAP);
+    }
   }
 }
 
@@ -168,9 +183,9 @@ async function runSequence(
   note2: string,
   updateStatus: (msg: string) => void
 ): Promise<void> {
-  // 1. Play pair as tones (2s each)
+  // 1. Play pair as tones
   updateStatus(`Playing: ${note1} - ${note2} (tones)`);
-  await playPairAsTones(note1, note2, 2);
+  await playPairAsTones(note1, note2);
   if (!isRunning) return;
 
   // 2. Pause 3s
@@ -180,7 +195,7 @@ async function runSequence(
 
   // 3. Repeat pair as tones
   updateStatus(`Repeat: ${note1} - ${note2} (tones)`);
-  await playPairAsTones(note1, note2, 2);
+  await playPairAsTones(note1, note2);
   if (!isRunning) return;
 
   // 4. Play solfege for pair
@@ -204,7 +219,7 @@ async function runSequence(
 
   // 7. Play pair again with longer fade on last note
   updateStatus(`Final: ${note1} - ${note2} (fading)`);
-  await playPairAsTones(note1, note2, 2, 1.5);
+  await playPairAsTones(note1, note2, NOTE_DURATION, 1.5);
   if (!isRunning) return;
 
   // Short pause before next
@@ -252,7 +267,7 @@ export function renderAmbientPairs(): void {
     <div class="info">
       <h3>Sequence per pair:</h3>
       <ol>
-        <li>Play note pair as tones (2s each)</li>
+        <li>Play note pair as tones (1.75s each)</li>
         <li>Pause (3s)</li>
         <li>Repeat pair as tones</li>
         <li>Play solfege for pair</li>
