@@ -1,7 +1,6 @@
 # List available commands
 # Docker image name
 # Install dependencies
-# Smoke test - verify TypeScript/Node tools are installed
 
 default:
 	@just --list
@@ -56,28 +55,6 @@ develop *ARGS:
 	# Generate GitHub token if GitHub App is configured
 	bash .devcontainer/scripts/generate-github-token.sh
 
-	# Start token refresh daemon if not already running
-	# The daemon runs on the host and refreshes the token before it expires
-	DAEMON_PID_FILE=".devcontainer/.credentials/daemon.pid"
-	DAEMON_SCRIPT=".devcontainer/token-refresh-daemon.py"
-	if [ -f "$DAEMON_SCRIPT" ]; then
-		NEED_DAEMON="yes"
-		if [ -f "$DAEMON_PID_FILE" ]; then
-			OLD_PID=$(cat "$DAEMON_PID_FILE" 2>/dev/null)
-			if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
-				echo "Token refresh daemon already running (PID $OLD_PID)"
-				NEED_DAEMON="no"
-			else
-				# Stale PID file, clean up
-				rm -f "$DAEMON_PID_FILE"
-			fi
-		fi
-		if [ "$NEED_DAEMON" = "yes" ]; then
-			echo "Starting token refresh daemon..."
-			python3 "$DAEMON_SCRIPT" --daemon
-		fi
-	fi
-
 	# Extract Claude credentials from macOS
 	# Claude Code needs two things:
 	# 1. OAuth tokens from Keychain -> .credentials.json
@@ -114,10 +91,6 @@ develop *ARGS:
 	else
 		echo "Note: Not running on macOS, skipping credential extraction"
 	fi
-
-	# Extract git identity from host for use in container
-	GIT_USER_NAME=$(git config --global user.name 2>/dev/null || echo "")
-	GIT_USER_EMAIL=$(git config --global user.email 2>/dev/null || echo "")
 
 	# Detect terminal background color mode
 	THEME="light-ansi"
@@ -156,8 +129,6 @@ develop *ARGS:
 		-v "ear-trainer-.cache:/workspaces/ear-trainer/.cache" \
 		-e ANTHROPIC_API_KEY= \
 		-e UV_PROJECT_ENVIRONMENT=/home/dev/venvs/ear-trainer \
-		-e GIT_USER_NAME="$GIT_USER_NAME" \
-		-e GIT_USER_EMAIL="$GIT_USER_EMAIL" \
 		-w /workspaces/ear-trainer \
 		--user dev \
 		--entrypoint /workspaces/ear-trainer/.devcontainer/entrypoint.sh \
@@ -172,28 +143,6 @@ install:
 
 lint:
 	npm run lint
-
-smoke-test:
-	#!/usr/bin/env bash
-	set -e
-	echo "Checking essential tools..."
-	command -v just >/dev/null || { echo "ERROR: just not installed"; exit 1; }
-	command -v git >/dev/null || { echo "ERROR: git not installed"; exit 1; }
-	command -v claude >/dev/null || { echo "ERROR: claude not installed"; exit 1; }
-	# Run language-specific smoke tests if they exist
-	for recipe in $(just --list --unsorted 2>/dev/null | grep '^smoke-test-' | awk '{print $1}'); do
-		echo "Running $recipe..."
-		just "$recipe"
-	done
-	echo "All essential tools present"
-
-smoke-test-typescript:
-	#!/usr/bin/env bash
-	set -e
-	command -v node >/dev/null || { echo "ERROR: node not installed"; exit 1; }
-	command -v npm >/dev/null || { echo "ERROR: npm not installed"; exit 1; }
-	node --version
-	echo "TypeScript/Node tools present"
 
 test *ARGS:
 	npm run test -- {{ARGS}}

@@ -27,26 +27,12 @@ export CLAUDE_CONFIG_DIR="$HOME/.claude"
 # Install Claude Code if not present
 # We install here (not in Dockerfile) because /home/dev is a volume mount
 # and would shadow any files installed during build
-# Use 'command -v' to check if claude is in PATH (works regardless of install location)
-if ! command -v claude &>/dev/null; then
+CLAUDE_INSTALL_MARKER="$HOME/.claude-installed"
+if [ ! -f "$CLAUDE_INSTALL_MARKER" ] || [ ! -x "$HOME/.claude/bin/claude" ]; then
     echo "Installing Claude Code..."
     curl -fsSL https://claude.ai/install.sh | bash
+    touch "$CLAUDE_INSTALL_MARKER"
     echo "Claude Code installed successfully"
-fi
-
-# Install Rust if not present
-# Same reason as Claude Code - /home/dev is a volume mount
-if ! command -v cargo &>/dev/null; then
-    echo "Installing Rust..."
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-    # Source cargo env for this session
-    source "$HOME/.cargo/env"
-    echo "Rust installed successfully"
-fi
-
-# Add cargo to PATH if it exists
-if [ -f "$HOME/.cargo/env" ]; then
-    source "$HOME/.cargo/env"
 fi
 
 # Copy Claude credentials from host if not present in container
@@ -190,46 +176,6 @@ print("SSH: configured for git push")
 SETUP_SSH
 
     echo "GitHub: credentials configured"
-fi
-
-# Configure git identity from host environment variables
-GIT_CONFIG_MARKER="$HOME/.git-identity-configured"
-if [ ! -f "$GIT_CONFIG_MARKER" ]; then
-    if [ -n "$GIT_USER_NAME" ]; then
-        git config --global user.name "$GIT_USER_NAME"
-        echo "Git: user.name set to '$GIT_USER_NAME'"
-    fi
-    if [ -n "$GIT_USER_EMAIL" ]; then
-        git config --global user.email "$GIT_USER_EMAIL"
-        echo "Git: user.email set to '$GIT_USER_EMAIL'"
-    fi
-    if [ -n "$GIT_USER_NAME" ] || [ -n "$GIT_USER_EMAIL" ]; then
-        touch "$GIT_CONFIG_MARKER"
-    fi
-fi
-
-# Configure git hooks path for project (if .githooks/ exists)
-PROJECT_DIR="/workspaces/ear-trainer"
-if [ -d "$PROJECT_DIR/.githooks" ] && [ -d "$PROJECT_DIR/.git" ]; then
-    # Set hooks path at repo level (not global)
-    git -C "$PROJECT_DIR" config core.hooksPath .githooks
-    echo "Git: hooksPath set to .githooks"
-fi
-
-# Set up node_modules in /home/dev for TypeScript projects (similar to Python's UV_PROJECT_ENVIRONMENT)
-# This prevents host/container node_modules conflicts
-PROJECT_DIR="/workspaces/ear-trainer"
-NODE_MODULES_TARGET="$HOME/node_modules/ear-trainer"
-if [ -f "$PROJECT_DIR/package.json" ]; then
-    # Create target directory in home volume
-    mkdir -p "$NODE_MODULES_TARGET"
-
-    # If node_modules doesn't exist or is already a symlink, set up the symlink
-    if [ ! -e "$PROJECT_DIR/node_modules" ] || [ -L "$PROJECT_DIR/node_modules" ]; then
-        rm -f "$PROJECT_DIR/node_modules" 2>/dev/null || true
-        ln -sf "$NODE_MODULES_TARGET" "$PROJECT_DIR/node_modules"
-        echo "Node: node_modules linked to $NODE_MODULES_TARGET"
-    fi
 fi
 
 # Run setup if not done yet (or if post-create.sh changed)
