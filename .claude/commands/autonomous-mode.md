@@ -5,8 +5,7 @@ description: Enter autonomous development mode with iterative task completion
 # Autonomous Development Mode
 
 You are entering **autonomous development mode**. This mode allows you to work
-iteratively on tasks with minimal human intervention, using beads for issue
-tracking and automatic progress detection.
+iteratively on tasks with minimal human intervention.
 
 ## Setup Phase
 
@@ -23,20 +22,19 @@ Write the session configuration to `.claude/autonomous-session.local.md`.
 
 For each iteration:
 
-1. Check for available issues with `bd ready`
-2. Pick the highest priority issue
-3. Implement the solution
-4. Run quality checks with `/quality-check`
-5. If checks pass, close the issue with `bd close <id>`
-6. Repeat until no issues remain or staleness detected
+1. Pick the next task to work on
+2. Implement the solution
+3. Run quality checks with `/quality-check`
+4. If checks pass, mark the task complete
+5. Repeat until no tasks remain or staleness detected
 
 ## Staleness Detection
 
-Stop if no progress for 5 iterations (same issues, no closes).
+Stop if no progress for 5 iterations.
 
 ## Exit Conditions
 
-- All issues completed
+- All tasks completed
 - Staleness detected
 - User intervention required
 - Quality gates failing repeatedly
