@@ -44,7 +44,7 @@ const NOTE_DURATION = 1.75; // Match Jennifer sample length
 const SCALE_NOTE_DURATION = 0.8; // For scale runs
 const NOTE_GAP = 300; // Gap between notes in ms
 const SCALE_GAP = 400; // Gap between scale notes in ms
-const TONE_VOLUME = 0.5; // Increased to better match solfege volume
+const TONE_VOLUME = 0.8; // Match solfege volume
 
 let isRunning = false;
 let currentAudio: HTMLAudioElement | null = null;
