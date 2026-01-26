@@ -20,6 +20,7 @@ RUN apt-get update \
 
 # Install base dependencies
 RUN apt-get update && apt-get install -y \
+    build-essential \
     ca-certificates \
     curl \
     git \
@@ -55,6 +56,6 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/home/dev/.local/bin:$PATH"
 USER root
 
-# NOTE: Claude Code is installed at container startup (in entrypoint.sh),
+# NOTE: Claude Code and Rust are installed at container startup (in entrypoint.sh),
 # not here in the Dockerfile, because /home/dev is mounted as a volume
 # and would shadow any files installed during build.

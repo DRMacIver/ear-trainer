@@ -1,5 +1,5 @@
 /**
- * Exercise index page.
+ * Main index page.
  */
 
 export function renderIndex(): void {
@@ -22,32 +22,27 @@ export function renderIndex(): void {
       </li>
     </ul>
 
-    <h2>Exercises</h2>
+    <h2>Practice</h2>
     <ul class="exercise-list">
       <li>
-        <a href="#/exercises/note-choice">
-          <div class="title">Note Choice</div>
+        <a href="#/exercises/tone-quiz">
+          <div class="title">Tone Quiz</div>
           <div class="description">
-            A single note plays - identify which of two options it is.
-            Great for beginners learning to distinguish between notes.
+            Two notes play - identify which one was the target note.
+            Continuous practice with progress tracking.
           </div>
         </a>
       </li>
+    </ul>
+
+    <h2>More</h2>
+    <ul class="exercise-list">
       <li>
-        <a href="#/exercises/progressive-id">
-          <div class="title">Progressive Note ID</div>
+        <a href="#/experimental">
+          <div class="title">Experimental Exercises</div>
           <div class="description">
-            Adaptive difficulty training. Starts with 2 notes, adds more as you improve.
-            Get 10 in a row to level up, struggle and it eases back.
-          </div>
-        </a>
-      </li>
-      <li>
-        <a href="#/exercises/note-matching">
-          <div class="title">Note Matching</div>
-          <div class="description">
-            Listen to multiple notes and drag their names to match each sound.
-            More challenging - tests your ability to identify several pitches.
+            Various ear training exercises in development.
+            Includes note identification, frequency training, and more.
           </div>
         </a>
       </li>

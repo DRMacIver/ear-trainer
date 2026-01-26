@@ -67,11 +67,12 @@ export interface PlayOptions {
 
 /**
  * Play a pure tone at the specified frequency.
+ * Returns a Promise that resolves when playback completes.
  */
 export function playFrequency(
   frequency: number,
   options: PlayOptions = {}
-): void {
+): Promise<void> {
   const { duration = 0.5, volume = 0.3 } = options;
   const ctx = getAudioContext();
 
@@ -93,17 +94,25 @@ export function playFrequency(
 
   oscillator.start(now);
   oscillator.stop(now + duration);
+
+  return new Promise((resolve) => {
+    oscillator.onended = () => resolve();
+  });
 }
 
 /**
  * Play a note by name (e.g., "A4", "C#4").
+ * Returns a Promise that resolves when playback completes.
  */
-export function playNote(note: string, options: PlayOptions = {}): void {
+export function playNote(
+  note: string,
+  options: PlayOptions = {}
+): Promise<void> {
   const frequency = NOTE_FREQUENCIES[note];
   if (frequency === undefined) {
     throw new Error(`Unknown note: ${note}`);
   }
-  playFrequency(frequency, options);
+  return playFrequency(frequency, options);
 }
 
 /**
@@ -116,6 +125,62 @@ export function selectRandomNotes(
 ): string[] {
   const shuffled = [...fromNotes].sort(() => Math.random() - 0.5);
   return shuffled.slice(0, count);
+}
+
+/**
+ * Get the chromatic index (0-11) of a note, ignoring octave.
+ * C=0, C#=1, D=2, etc.
+ */
+export function getChromaticIndex(note: string): number {
+  // Extract note name without octave
+  const noteName = note.replace(/\d+$/, "");
+  return NOTE_NAMES.indexOf(noteName);
+}
+
+/**
+ * Check if two notes are semitones (adjacent in chromatic scale).
+ * This considers wrapping (B and C are semitones).
+ */
+export function areSemitones(note1: string, note2: string): boolean {
+  const idx1 = getChromaticIndex(note1);
+  const idx2 = getChromaticIndex(note2);
+  const diff = Math.abs(idx1 - idx2);
+  return diff === 1 || diff === 11; // 11 handles B-C wrapping
+}
+
+/**
+ * Select n random notes ensuring no two are semitones of each other.
+ * By default, only uses octave 4 notes for exercises.
+ */
+export function selectWellSeparatedNotes(
+  count: number,
+  fromNotes: string[] = OCTAVE_4_NOTES
+): string[] {
+  const shuffled = shuffle([...fromNotes]);
+  const selected: string[] = [];
+
+  for (const note of shuffled) {
+    if (selected.length >= count) break;
+
+    // Check if this note is a semitone of any already selected
+    const isTooClose = selected.some((s) => areSemitones(note, s));
+    if (!isTooClose) {
+      selected.push(note);
+    }
+  }
+
+  // Fallback: if we couldn't find enough well-separated notes, just return what we have
+  // plus fill with remaining shuffled notes (shouldn't happen with 12 notes and count <= 6)
+  if (selected.length < count) {
+    for (const note of shuffled) {
+      if (selected.length >= count) break;
+      if (!selected.includes(note)) {
+        selected.push(note);
+      }
+    }
+  }
+
+  return selected;
 }
 
 /**

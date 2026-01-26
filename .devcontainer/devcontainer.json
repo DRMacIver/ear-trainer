@@ -6,9 +6,7 @@
   "features": {},
   "customizations": {
     "vscode": {
-      "extensions": [
-        "EditorConfig.EditorConfig"
-      ],
+      "extensions": ["EditorConfig.EditorConfig"],
       "settings": {}
     }
   },
