@@ -11,3 +11,8 @@ coverage/
 .npm/
 *.tsbuildinfo
 tmp-audio/
+
+# Added by capability regeneration
+.claude/jkw-session.local.md
+.claude/jkw-state.local.yaml
+.claude/beads-warning-given.local
