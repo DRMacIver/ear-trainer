@@ -10,3 +10,6 @@ dist/
 coverage/
 .npm/
 *.tsbuildinfo
+.beads/.sync.lock
+.beads/sync_base.jsonl
+tmp-audio/
