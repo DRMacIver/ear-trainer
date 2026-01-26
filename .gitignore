@@ -18,7 +18,6 @@ tmp-audio/
 .claude/beads-warning-given.local
 
 # claude-reliability managed
-.claude-reliability/
 .claude/bin/
 .claude/*.local.md
 .claude/*.local.json
