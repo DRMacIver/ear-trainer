@@ -13,3 +13,4 @@ coverage/
 .beads/.sync.lock
 .beads/sync_base.jsonl
 tmp-audio/
+.claude-reliability/
