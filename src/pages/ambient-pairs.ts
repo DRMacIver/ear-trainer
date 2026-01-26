@@ -49,6 +49,14 @@ const SOLFEGE_VOLUME = 0.5; // Reduce solfege to match perceived tone loudness
 
 let isRunning = false;
 let currentAudio: HTMLAudioElement | null = null;
+let audioContext: AudioContext | null = null;
+
+function getAudioContext(): AudioContext {
+  if (!audioContext) {
+    audioContext = new AudioContext();
+  }
+  return audioContext;
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -86,7 +94,7 @@ async function playTone(
   if (!isRunning) return;
 
   const frequency = NOTE_FREQUENCIES[note];
-  const ctx = new AudioContext();
+  const ctx = getAudioContext();
   const oscillator = ctx.createOscillator();
   const gainNode = ctx.createGain();
 
@@ -108,10 +116,7 @@ async function playTone(
   oscillator.stop(now + duration);
 
   await new Promise<void>((resolve) => {
-    oscillator.onended = () => {
-      ctx.close();
-      resolve();
-    };
+    oscillator.onended = () => resolve();
   });
 }
 
@@ -356,6 +361,10 @@ export function renderAmbientPairs(): void {
     if (currentAudio) {
       currentAudio.pause();
       currentAudio = null;
+    }
+    if (audioContext) {
+      audioContext.close();
+      audioContext = null;
     }
   });
 }
