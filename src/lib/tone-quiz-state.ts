@@ -68,6 +68,10 @@ export interface ToneQuizState {
   // e.g., singleNotePerformance["C"]["G"] tracks "identify C when choice is C vs G"
   singleNotePerformance: Record<string, Record<string, boolean[]>>;
 
+  // Octave progression: tracks which octaves are unlocked per note
+  // All notes start with [4], unlock 3 or 5 based on mastery
+  unlockedOctaves: Record<FullTone, number[]>;
+
   // Sticky target state
   currentTarget: FullTone | null;
   currentTargetOctave: number | null;
@@ -83,6 +87,15 @@ export interface ToneQuizState {
   session: SessionInfo;
 }
 
+/** Create default unlocked octaves - all notes start with octave 4 only */
+function createDefaultUnlockedOctaves(): Record<FullTone, number[]> {
+  const result: Partial<Record<FullTone, number[]>> = {};
+  for (const note of FULL_TONES) {
+    result[note] = [4];
+  }
+  return result as Record<FullTone, number[]>;
+}
+
 function createInitialState(): ToneQuizState {
   return {
     history: [],
@@ -90,6 +103,7 @@ function createInitialState(): ToneQuizState {
     learningVocabulary: ["C", "G"], // Start with C and G
     performance: {},
     singleNotePerformance: {},
+    unlockedOctaves: createDefaultUnlockedOctaves(),
     currentTarget: null,
     currentTargetOctave: null,
     correctStreak: 0,
@@ -117,6 +131,7 @@ export function loadState(): ToneQuizState {
     ...parsed,
     // Ensure new fields have defaults (migration from older state)
     singleNotePerformance: parsed.singleNotePerformance ?? {},
+    unlockedOctaves: parsed.unlockedOctaves ?? createDefaultUnlockedOctaves(),
     pairCards: parsed.pairCards ?? {},
     session: parsed.session ?? {
       sessionStartTime: Date.now(),
@@ -880,4 +895,145 @@ export function updateStreak(state: ToneQuizState, wasCorrect: boolean): ToneQui
  */
 export function randomizeOrder<T>(a: T, b: T): [T, T] {
   return Math.random() < 0.5 ? [a, b] : [b, a];
+}
+
+// ============================================================================
+// Octave Progression Functions
+// ============================================================================
+
+/**
+ * Get the unlocked octaves for a note.
+ * Returns array of octaves the user has unlocked (starts with [4]).
+ */
+export function getUnlockedOctavesForNote(
+  state: ToneQuizState,
+  note: FullTone
+): number[] {
+  return state.unlockedOctaves[note] ?? [4];
+}
+
+/**
+ * Get the next octave to introduce for a note.
+ * Top-half notes (E, F, G, A, B) get octave 3 first.
+ * Bottom-half notes (C, D) get octave 5 first.
+ * Third octave is whichever wasn't introduced yet.
+ */
+export function getNextOctaveToIntroduce(
+  state: ToneQuizState,
+  note: FullTone
+): number | null {
+  const unlocked = getUnlockedOctavesForNote(state, note);
+
+  // All three octaves unlocked
+  if (unlocked.length >= 3) {
+    return null;
+  }
+
+  // Determine first additional octave based on note position
+  const isTopHalf = ["E", "F", "G", "A", "B"].includes(note);
+  const firstAdditional = isTopHalf ? 3 : 5;
+  const secondAdditional = isTopHalf ? 5 : 3;
+
+  if (!unlocked.includes(firstAdditional)) {
+    return firstAdditional;
+  }
+  if (!unlocked.includes(secondAdditional)) {
+    return secondAdditional;
+  }
+
+  return null;
+}
+
+/**
+ * Check if a note is ready for a new octave.
+ * A note is ready when:
+ * 1. Single-note questions: familiar with all pairs involving this note
+ * 2. Two-note questions: familiar with all adjacent pairs involving this note
+ */
+export function isNoteReadyForNewOctave(
+  state: ToneQuizState,
+  note: FullTone
+): boolean {
+  // Must be in learning vocabulary
+  if (!state.learningVocabulary.includes(note)) {
+    return false;
+  }
+
+  // Must have another octave to unlock
+  if (getNextOctaveToIntroduce(state, note) === null) {
+    return false;
+  }
+
+  const vocab = state.learningVocabulary;
+
+  // Check single-note familiarity with all vocab notes
+  for (const other of vocab) {
+    if (other === note) continue;
+    if (!isSingleNotePairFamiliar(state, note, other)) {
+      return false;
+    }
+  }
+
+  // Check two-note familiarity with adjacent notes (in full chromatic scale)
+  const [lower, upper] = getAdjacentNotes(note);
+  if (vocab.includes(lower) && !isFamiliarWith(state, note, lower)) {
+    return false;
+  }
+  if (vocab.includes(upper) && !isFamiliarWith(state, note, upper)) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Introduce a new octave for a note.
+ * Returns updated state with the octave added to unlockedOctaves.
+ */
+export function introduceOctave(
+  state: ToneQuizState,
+  note: FullTone,
+  octave: number
+): ToneQuizState {
+  const currentOctaves = getUnlockedOctavesForNote(state, note);
+  if (currentOctaves.includes(octave)) {
+    return state; // Already unlocked
+  }
+
+  return {
+    ...state,
+    unlockedOctaves: {
+      ...state.unlockedOctaves,
+      [note]: [...currentOctaves, octave].sort((a, b) => a - b),
+    },
+  };
+}
+
+/**
+ * Pick a random octave from the unlocked octaves for a note.
+ */
+export function pickRandomUnlockedOctave(
+  state: ToneQuizState,
+  note: FullTone
+): number {
+  const unlocked = getUnlockedOctavesForNote(state, note);
+  return unlocked[Math.floor(Math.random() * unlocked.length)];
+}
+
+/**
+ * Find a note that is ready for octave introduction.
+ * Returns the note and the octave to introduce, or null if none ready.
+ */
+export function findNoteReadyForOctaveIntro(
+  state: ToneQuizState
+): { note: FullTone; octave: number } | null {
+  for (const note of state.learningVocabulary) {
+    if (isNoteReadyForNewOctave(state, note)) {
+      const octave = getNextOctaveToIntroduce(state, note);
+      if (octave !== null) {
+        return { note, octave };
+      }
+    }
+  }
+  return null;
 }
