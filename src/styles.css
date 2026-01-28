@@ -405,7 +405,7 @@ kbd {
   font-weight: 400;
   color: var(--accent-primary);
   margin-top: calc(-1 * var(--space-sm));
-  margin-bottom: var(--space-sm);
+  margin-bottom: var(--space-lg);
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
@@ -415,13 +415,12 @@ kbd {
 }
 
 .intro-container.exercise-container {
-  gap: var(--space-md);
+  gap: var(--space-lg);
 }
 
 .intro-container .intro-section {
-  margin-top: 0;
-  margin-bottom: var(--space-md);
-  padding-top: 0;
+  margin: 0;
+  padding: 0;
 }
 
 .intro-container .intro-section h2 {
@@ -438,7 +437,7 @@ kbd {
 }
 
 .intro-steps {
-  margin: var(--space-md) 0 0 0;
+  margin: var(--space-md) 0 var(--space-lg) 0;
   padding-left: var(--space-lg);
   list-style: none;
   counter-reset: steps;
