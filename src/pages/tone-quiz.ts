@@ -12,18 +12,10 @@ import {
   clearState,
   randomizeOrder,
   recordQuestion,
-  selectTargetNote,
-  pickRandomOctave,
-  updateStreak,
-  maybeStartNewSession,
-  getRepeatProbability,
-  selectMostUrgentPair,
   getLastIntroducedNote,
   getUnlockedTwoToneVariants,
   getUnlockedSingleNoteVariants,
   parseVariantKey,
-  makeVariantKey,
-  normalizePair,
   ToneQuizState,
   FullTone,
   FULL_TONES,
@@ -54,8 +46,6 @@ interface QuestionState {
   otherNote: FullTone; // The alternative choice
   hasAnswered: boolean;
   wasCorrect: boolean | null;
-  isFirstInStreak: boolean;
-  countsForStreak: boolean; // False for retries/repeats
   startTime: number;
   // For single-note questions: which option is displayed first (randomized)
   displayOrder: [FullTone, FullTone];
@@ -75,131 +65,64 @@ let introState: IntroductionState | null = null;
 let keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
 let autoAdvanceTimeout: ReturnType<typeof setTimeout> | null = null;
 let shouldRetry = false; // Whether next advance should retry same question
-let shouldRepeatSwapped = false; // Whether to repeat correct answer with swapped order
 let isPlaying = false; // Whether audio is currently playing
 
-// Single-note cycle queue: when non-empty, we're in a single-note cycle
-// Each entry is a note to ask about (paired with another note from ready pairs)
-let singleNoteQueue: FullTone[] = [];
+// Track the last question type for stickiness
+let lastQuestionType: QuestionType | null = null;
 
 const AUTO_ADVANCE_DELAY = 750; // ms
-const RETRY_CHANCE = 1.0; // Always retry after wrong answer until correct
-const REPEAT_CORRECT_CHANCE = 0.3; // 30% chance to repeat after correct answer
-const MAX_SINGLE_NOTE_CYCLE = 6; // Cap single-note cycle at 6 notes
+/** Probability of staying on the same question type (two-note vs single-note) */
+const TYPE_STICKINESS = 0.7;
 
-/** Probability of starting a single-note cycle when pairs are available */
-const SINGLE_NOTE_CYCLE_CHANCE = 0.3;
-
-/** Shuffle array in place using Fisher-Yates */
-function shuffleArray<T>(array: T[]): void {
-  for (let i = array.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [array[i], array[j]] = [array[j], array[i]];
-  }
-}
-
-/** Start a single-note cycle by populating the queue with all notes from unlocked variants */
-function startSingleNoteCycle(): void {
-  const unlockedVariants = getUnlockedSingleNoteVariants(persistentState);
-  if (unlockedVariants.length === 0) return;
-
-  // Get all unique notes from unlocked single-note variants
-  const uniqueNotes = new Set<FullTone>();
-  for (const variant of unlockedVariants) {
-    const { pair } = parseVariantKey(variant);
-    const [a, b] = pair.split("-") as [FullTone, FullTone];
-    uniqueNotes.add(a);
-    uniqueNotes.add(b);
-  }
-
-  // Convert to array, shuffle, and cap at MAX_SINGLE_NOTE_CYCLE
-  const notes = Array.from(uniqueNotes);
-  shuffleArray(notes);
-  singleNoteQueue = notes.slice(0, MAX_SINGLE_NOTE_CYCLE);
-}
-
-interface InitQuestionResult {
-  isNewTarget: boolean;
-  introducedNote: FullTone | null;
-}
-
-function initQuestion(): InitQuestionResult {
-  const now = Date.now();
-
-  // Maybe start new session (if inactive for more than 5 minutes)
-  persistentState = maybeStartNewSession(persistentState, now);
-
-  // If we're in a single-note cycle, continue with it
-  if (singleNoteQueue.length > 0) {
-    return initSingleNoteQuestion();
-  }
-
-  // Check if we should start a new single-note cycle (if single-note variants are unlocked)
+function initQuestion(): void {
+  // Decide question type based on what's available and stickiness
+  const twoToneVariants = getUnlockedTwoToneVariants(persistentState);
   const singleNoteVariants = getUnlockedSingleNoteVariants(persistentState);
-  if (singleNoteVariants.length > 0 && Math.random() < SINGLE_NOTE_CYCLE_CHANCE) {
-    startSingleNoteCycle();
-    return initSingleNoteQuestion();
+
+  let questionType: QuestionType;
+
+  if (singleNoteVariants.length === 0) {
+    // Only two-tone available
+    questionType = "two-note";
+  } else if (twoToneVariants.length === 0) {
+    // Only single-note available (shouldn't happen, but handle it)
+    questionType = "single-note";
+  } else if (lastQuestionType !== null && Math.random() < TYPE_STICKINESS) {
+    // 70% chance to stay on same type
+    questionType = lastQuestionType;
+  } else {
+    // Randomly pick type (weighted towards two-tone since it's more common)
+    questionType = Math.random() < 0.6 ? "two-note" : "single-note";
   }
 
-  // Roll for repeat based on session freshness
-  const repeatProb = getRepeatProbability(persistentState, now);
-  const shouldRepeat = Math.random() < repeatProb;
+  lastQuestionType = questionType;
 
-  if (shouldRepeat) {
-    // Try to find most urgent review card
-    const pair = selectMostUrgentPair(persistentState);
-    if (pair) {
-      // Use FSRS-selected pair
-      return initQuestionFromPair(pair.target, pair.other);
-    }
+  if (questionType === "single-note") {
+    initSingleNoteQuestion();
+  } else {
+    initTwoNoteQuestion();
   }
-
-  // Fall through to normal selection
-  return initQuestionNormal();
 }
 
-/** Initialize a single-note question using the cycle queue */
-function initSingleNoteQuestion(): {
-  isNewTarget: boolean;
-  introducedNote: FullTone | null;
-} {
-  // Get all unlocked single-note variants
+/** Initialize a random single-note question from unlocked variants */
+function initSingleNoteQuestion(): void {
   const unlockedVariants = getUnlockedSingleNoteVariants(persistentState);
   if (unlockedVariants.length === 0) {
-    // No single-note variants unlocked yet, fallback to two-note
-    return initQuestionNormal();
+    // Fallback to two-note if no single-note variants
+    initTwoNoteQuestion();
+    return;
   }
 
-  // Pop the next note from the queue
-  const noteToPlay = singleNoteQueue.pop();
-
-  if (!noteToPlay) {
-    // Queue empty, fallback to normal question
-    return initQuestionNormal();
-  }
-
-  // Find variants that include this note
-  const matchingVariants = unlockedVariants.filter((v) => {
-    const { pair } = parseVariantKey(v);
-    const [a, b] = pair.split("-") as [FullTone, FullTone];
-    return a === noteToPlay || b === noteToPlay;
-  });
-
-  if (matchingVariants.length === 0) {
-    // No matching variant found, fallback to normal question
-    return initQuestionNormal();
-  }
-
-  // Pick a random matching variant
+  // Pick a random variant
   const selectedVariant =
-    matchingVariants[Math.floor(Math.random() * matchingVariants.length)];
+    unlockedVariants[Math.floor(Math.random() * unlockedVariants.length)];
   const { pair, octaves } = parseVariantKey(selectedVariant);
   const [pairNote1, pairNote2] = pair.split("-") as [FullTone, FullTone];
 
-  // The note we're playing is noteToPlay, the alternative is the other note in the pair
-  const alternative = pairNote1 === noteToPlay ? pairNote2 : pairNote1;
+  // Randomly pick which note to play
+  const [noteToPlay, alternative] =
+    Math.random() < 0.5 ? [pairNote1, pairNote2] : [pairNote2, pairNote1];
 
-  // Use the octave from the variant
   const playedOctave = octaves as number;
   const playedWithOctave = `${noteToPlay}${playedOctave}`;
 
@@ -208,65 +131,39 @@ function initSingleNoteQuestion(): {
 
   question = {
     questionType: "single-note",
-    note1: playedWithOctave, // The note that will be played
-    note2: "", // Not used for single-note
+    note1: playedWithOctave,
+    note2: "",
     family1: noteToPlay,
-    family2: noteToPlay, // Same as family1 for single-note
-    targetNote: noteToPlay, // The correct answer
-    otherNote: alternative, // The wrong answer
+    family2: noteToPlay,
+    targetNote: noteToPlay,
+    otherNote: alternative,
     hasAnswered: false,
     wasCorrect: null,
-    isFirstInStreak: true,
-    countsForStreak: true,
     startTime: Date.now(),
     displayOrder,
     variantKey: selectedVariant,
   };
-
-  return { isNewTarget: false, introducedNote: null };
 }
 
-/** Initialize question from a specific target-other pair (FSRS repeat) */
-function initQuestionFromPair(
-  targetNote: FullTone,
-  otherNote: FullTone
-): { isNewTarget: boolean; introducedNote: FullTone | null } {
-  const pair = normalizePair(targetNote, otherNote);
-
-  // Get unlocked two-tone variants for this pair
-  const unlockedVariants = getUnlockedTwoToneVariants(persistentState).filter(
-    (v) => v.startsWith(`${pair}:`)
-  );
-
+/** Initialize a random two-note question from unlocked variants */
+function initTwoNoteQuestion(): void {
+  const unlockedVariants = getUnlockedTwoToneVariants(persistentState);
   if (unlockedVariants.length === 0) {
-    // Fallback: use the initial variant (4-4)
-    const variantKey = makeVariantKey(pair, "two-note", [4, 4]);
-    return initTwoNoteQuestionFromVariant(targetNote, otherNote, variantKey, true);
+    throw new Error("No unlocked two-tone variants");
   }
 
-  // Pick a random unlocked variant
+  // Pick a random variant
   const selectedVariant =
     unlockedVariants[Math.floor(Math.random() * unlockedVariants.length)];
-
-  return initTwoNoteQuestionFromVariant(targetNote, otherNote, selectedVariant, true);
-}
-
-/** Helper: Initialize a two-note question from a variant key */
-function initTwoNoteQuestionFromVariant(
-  targetNote: FullTone,
-  otherNote: FullTone,
-  variantKey: string,
-  isFirstInStreak: boolean
-): { isNewTarget: boolean; introducedNote: FullTone | null } {
-  const { octaves } = parseVariantKey(variantKey);
+  const { pair, octaves } = parseVariantKey(selectedVariant);
   const [octave1, octave2] = octaves as [number, number];
+  const [pairNote1, pairNote2] = pair.split("-") as [FullTone, FullTone];
 
-  // The pair in the variant key is alphabetically sorted, so we need to figure out
-  // which octave goes with which note
-  const pair = normalizePair(targetNote, otherNote);
-  const [pairNote1] = pair.split("-") as [FullTone, FullTone];
+  // Randomly pick which note is the target
+  const [targetNote, otherNote] =
+    Math.random() < 0.5 ? [pairNote1, pairNote2] : [pairNote2, pairNote1];
 
-  // octave1 goes with pairNote1, octave2 goes with pairNote2
+  // Octaves match the pair order (pairNote1 gets octave1, pairNote2 gets octave2)
   const targetOctave = targetNote === pairNote1 ? octave1 : octave2;
   const otherOctave = otherNote === pairNote1 ? octave1 : octave2;
 
@@ -279,20 +176,6 @@ function initTwoNoteQuestionFromVariant(
     { note: otherWithOctave, family: otherNote }
   );
 
-  // Check if this is actually a new target vs current target
-  const isNewTarget = targetNote !== persistentState.currentTarget;
-
-  // Update current target state if changed
-  if (isNewTarget) {
-    persistentState = {
-      ...persistentState,
-      currentTarget: targetNote,
-      currentTargetOctave: targetOctave,
-      correctStreak: 0,
-      isFirstOnTarget: false,
-    };
-  }
-
   question = {
     questionType: "two-note",
     note1: first.note,
@@ -303,72 +186,10 @@ function initTwoNoteQuestionFromVariant(
     otherNote,
     hasAnswered: false,
     wasCorrect: null,
-    isFirstInStreak,
-    countsForStreak: true,
     startTime: Date.now(),
-    displayOrder: [targetNote, otherNote], // Not used for two-note questions
-    variantKey,
+    displayOrder: [targetNote, otherNote],
+    variantKey: selectedVariant,
   };
-
-  return { isNewTarget, introducedNote: null };
-}
-
-/** Initialize question using normal selection (variant-based) */
-function initQuestionNormal(): {
-  isNewTarget: boolean;
-  introducedNote: FullTone | null;
-} {
-  // Get all unlocked two-tone variants
-  const unlockedVariants = getUnlockedTwoToneVariants(persistentState);
-  if (unlockedVariants.length === 0) {
-    // This shouldn't happen since we start with C-G:two-note:4-4 unlocked
-    throw new Error("No unlocked two-tone variants");
-  }
-
-  // Select target note (with stickiness - stays until 3 correct in a row)
-  const [
-    targetNote,
-    , // octave from selectTargetNote is ignored - we use variants
-    , // isNewTarget is computed in initTwoNoteQuestionFromVariant
-    isFirstOnTarget,
-    updatedState,
-  ] = selectTargetNote(persistentState, pickRandomOctave);
-  persistentState = updatedState;
-
-  // Find variants that include the target note
-  const matchingVariants = unlockedVariants.filter((v) => {
-    const { pair } = parseVariantKey(v);
-    const [a, b] = pair.split("-") as [FullTone, FullTone];
-    return a === targetNote || b === targetNote;
-  });
-
-  if (matchingVariants.length === 0) {
-    // Target note has no unlocked variants yet - pick any unlocked variant
-    // This can happen if a note was just added but variants not unlocked
-    const randomVariant =
-      unlockedVariants[Math.floor(Math.random() * unlockedVariants.length)];
-    const { pair } = parseVariantKey(randomVariant);
-    const [a, b] = pair.split("-") as [FullTone, FullTone];
-    // Pick one as target randomly
-    const [newTarget, other] = Math.random() < 0.5 ? [a, b] : [b, a];
-    return initTwoNoteQuestionFromVariant(newTarget, other, randomVariant, true);
-  }
-
-  // Pick a random matching variant
-  const selectedVariant =
-    matchingVariants[Math.floor(Math.random() * matchingVariants.length)];
-  const { pair } = parseVariantKey(selectedVariant);
-  const [pairNote1, pairNote2] = pair.split("-") as [FullTone, FullTone];
-
-  // The other note is the one that's not the target
-  const otherNote = pairNote1 === targetNote ? pairNote2 : pairNote1;
-
-  return initTwoNoteQuestionFromVariant(
-    targetNote,
-    otherNote,
-    selectedVariant,
-    isFirstOnTarget
-  );
 }
 
 async function playQuestionNotes(): Promise<void> {
@@ -379,12 +200,6 @@ async function playQuestionNotes(): Promise<void> {
     await playNote(question.note2, { duration: NOTE_DURATION });
   }
   isPlaying = false;
-}
-
-function flashScreen(): void {
-  const app = document.getElementById("app")!;
-  app.classList.add("flash");
-  setTimeout(() => app.classList.remove("flash"), 300);
 }
 
 /** Get vocab notes in chromatic order */
@@ -726,9 +541,6 @@ function advanceToNext(): void {
   if (shouldRetry) {
     shouldRetry = false;
     retryQuestion();
-  } else if (shouldRepeatSwapped) {
-    shouldRepeatSwapped = false;
-    retryQuestion(); // retryQuestion already randomizes order
   } else {
     nextQuestion();
   }
@@ -749,7 +561,6 @@ function handleChoice(chosenIndex: number): void {
   // For single-note: check if chosen option in displayOrder is the target
   let isCorrect: boolean;
   if (isSingleNote) {
-    // displayOrder is randomized, check if chosen note is the target
     isCorrect = question.displayOrder[chosenIndex] === question.targetNote;
   } else {
     const chosenFamily =
@@ -760,21 +571,13 @@ function handleChoice(chosenIndex: number): void {
   question.hasAnswered = true;
   question.wasCorrect = isCorrect;
 
-  // Decide next action
-  if (isCorrect) {
-    // 30% chance to repeat with swapped order (doesn't count for streak)
-    // Only for two-note questions
-    shouldRepeatSwapped =
-      !isSingleNote && Math.random() < REPEAT_CORRECT_CHANCE;
-  } else {
-    // Always retry on wrong answer
-    shouldRetry = Math.random() < RETRY_CHANCE;
-  }
+  // Retry on wrong answer until correct
+  shouldRetry = !isCorrect;
 
   // Save previous state to detect note introductions
   const prevState = persistentState;
 
-  // Record to persistent state (map to noteA/noteB for QuestionRecord)
+  // Record to persistent state - all questions count for progression
   persistentState = recordQuestion(persistentState, {
     timestamp: Date.now(),
     questionType: question.questionType,
@@ -783,7 +586,7 @@ function handleChoice(chosenIndex: number): void {
     targetNote: question.targetNote,
     otherNote: question.otherNote,
     correct: isCorrect,
-    wasFirstInStreak: question.isFirstInStreak,
+    wasFirstInStreak: true, // All questions count
     timeMs: Date.now() - question.startTime,
     variantKey: question.variantKey,
   });
@@ -791,10 +594,6 @@ function handleChoice(chosenIndex: number): void {
   // Check if a note was just introduced
   pendingIntroducedNote = getLastIntroducedNote(prevState, persistentState);
 
-  // Only update streak if this question counts and won't be repeated (two-note only)
-  if (question.countsForStreak && !shouldRepeatSwapped && !isSingleNote) {
-    persistentState = updateStreak(persistentState, isCorrect);
-  }
   saveState(persistentState);
 
   renderChoiceButtons();
@@ -875,8 +674,6 @@ function retryQuestion(): void {
       ...question,
       hasAnswered: false,
       wasCorrect: null,
-      isFirstInStreak: false, // Retry never counts for familiarity
-      countsForStreak: false,
       startTime: Date.now(),
     };
   } else {
@@ -903,11 +700,9 @@ function retryQuestion(): void {
       otherNote: question.otherNote,
       hasAnswered: false,
       wasCorrect: null,
-      isFirstInStreak: false, // Retry never counts for familiarity
-      countsForStreak: false, // Retries/repeats don't count for streak
       startTime: Date.now(),
-      displayOrder: [question.targetNote, question.otherNote], // Not used for two-note
-      variantKey: question.variantKey, // Preserve variant key
+      displayOrder: [question.targetNote, question.otherNote],
+      variantKey: question.variantKey,
     };
   }
 
@@ -926,12 +721,8 @@ function nextQuestion(): void {
     return;
   }
 
-  const { isNewTarget } = initQuestion();
-
+  initQuestion();
   render();
-  if (isNewTarget) {
-    flashScreen();
-  }
   playQuestionNotes();
 }
 
