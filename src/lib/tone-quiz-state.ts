@@ -47,6 +47,9 @@ export const UNLOCK_COOLDOWN = 20;
 
 /** Correct in a row PER PAIR (across any octave) to unlock next variant */
 export const PAIR_COMPLETION_STREAK = 4;
+
+/** Correct answers in a row to enter accelerated mode */
+export const ACCELERATED_MODE_THRESHOLD = 10;
 /** Look at last N single-note questions for new note unlock */
 export const NOTE_UNLOCK_WINDOW = 20;
 /** Need this many correct out of NOTE_UNLOCK_WINDOW (90%) */
@@ -118,6 +121,9 @@ export interface ToneQuizState {
   pairStreaks: Record<string, number>; // pair (e.g., "C-G") -> current streak for unlock (across any octave)
   recentSingleNoteResults: boolean[]; // Last NOTE_UNLOCK_WINDOW results across all single-note questions
 
+  // Accelerated mode: unlock on every correct answer when streak >= 10
+  globalCorrectStreak: number; // Consecutive correct answers across all questions
+
   // Pending note unlocks (only for new notes, not variant unlocks)
   pendingUnlocks: PendingUnlock[]; // Queue of note unlocks waiting for cooldown
   questionsSinceLastUnlock: number; // Counter for note unlock cooldown
@@ -142,6 +148,7 @@ function createInitialState(): ToneQuizState {
     unlockedVariants: ["C-G:two-note:4-4"],
     pairStreaks: {},
     recentSingleNoteResults: [],
+    globalCorrectStreak: 0,
     pendingUnlocks: [],
     questionsSinceLastUnlock: 0,
     pairCards: {},
@@ -455,6 +462,58 @@ export function recordVariantResult(
   } else {
     // Reset pair streak on wrong answer
     newState.pairStreaks = { ...state.pairStreaks, [pair]: 0 };
+  }
+
+  return newState;
+}
+
+/**
+ * Force unlock the next available thing (accelerated mode).
+ * Priority: variant for existing pairs first, then new notes.
+ * Returns updated state with something unlocked (if possible).
+ */
+export function forceUnlockNext(state: ToneQuizState): ToneQuizState {
+  // First, try to unlock the next variant for any existing pair
+  for (const note1 of state.learningVocabulary) {
+    for (const note2 of state.learningVocabulary) {
+      if (note1 >= note2) continue; // Avoid duplicates and self-pairs
+      const pair = normalizePair(note1, note2);
+      const nextVariant = getNextVariantToUnlock(state, pair);
+      if (nextVariant) {
+        return {
+          ...state,
+          unlockedVariants: [...state.unlockedVariants, nextVariant],
+          questionsSinceLastUnlock: 0,
+        };
+      }
+    }
+  }
+
+  // All variants unlocked for existing pairs - try to unlock a new note
+  const nextNote = getNextNoteToLearn(state);
+  if (!nextNote) {
+    return state; // Everything unlocked
+  }
+
+  // Unlock the note and its initial variants
+  let newState: ToneQuizState = {
+    ...state,
+    learningVocabulary: [...state.learningVocabulary, nextNote],
+    questionsSinceLastUnlock: 0,
+  };
+
+  // Add initial variants for the new note paired with each existing vocab note
+  const newVariants: string[] = [];
+  for (const existingNote of state.learningVocabulary) {
+    const pair = normalizePair(nextNote, existingNote);
+    const initialVariant = getInitialVariant(pair);
+    if (!newState.unlockedVariants.includes(initialVariant)) {
+      newVariants.push(initialVariant);
+    }
+  }
+
+  if (newVariants.length > 0) {
+    newState.unlockedVariants = [...newState.unlockedVariants, ...newVariants];
   }
 
   return newState;
@@ -939,12 +998,21 @@ export function recordQuestion(
   state: ToneQuizState,
   record: QuestionRecord
 ): ToneQuizState {
+  // Update global correct streak (for accelerated mode)
+  const newGlobalStreak = record.correct ? (state.globalCorrectStreak ?? 0) + 1 : 0;
+
   let newState: ToneQuizState = {
     ...state,
     history: [...state.history, record],
     lastPlayedAt: record.timestamp,
     questionsSinceLastUnlock: state.questionsSinceLastUnlock + 1,
+    globalCorrectStreak: newGlobalStreak,
   };
+
+  // Accelerated mode: when on a streak of 10+, unlock something on each correct answer
+  if (record.correct && newGlobalStreak >= ACCELERATED_MODE_THRESHOLD) {
+    newState = forceUnlockNext(newState);
+  }
 
   // Only update performance and FSRS state if this was first in streak
   if (record.wasFirstInStreak) {

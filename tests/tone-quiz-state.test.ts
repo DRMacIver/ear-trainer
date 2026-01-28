@@ -1714,3 +1714,132 @@ describe("recordQuestion with variant tracking", () => {
     expect(state.pairStreaks["C-G"]).toBeUndefined();
   });
 });
+
+describe("accelerated mode", () => {
+  beforeEach(() => {
+    localStorageMock.clear();
+  });
+
+  it("tracks global correct streak", () => {
+    let state = loadState();
+    expect(state.globalCorrectStreak).toBe(0);
+
+    // Get 3 correct in a row
+    for (let i = 0; i < 3; i++) {
+      state = recordQuestion(state, {
+        timestamp: Date.now(),
+        questionType: "two-note",
+        noteA: "C4",
+        noteB: "G4",
+        targetNote: "C",
+        otherNote: "G",
+        correct: true,
+        wasFirstInStreak: true,
+        variantKey: "C-G:two-note:4-4",
+      });
+    }
+    expect(state.globalCorrectStreak).toBe(3);
+
+    // Wrong answer resets streak
+    state = recordQuestion(state, {
+      timestamp: Date.now(),
+      questionType: "two-note",
+      noteA: "C4",
+      noteB: "G4",
+      targetNote: "C",
+      otherNote: "G",
+      correct: false,
+      wasFirstInStreak: true,
+      variantKey: "C-G:two-note:4-4",
+    });
+    expect(state.globalCorrectStreak).toBe(0);
+  });
+
+  it("unlocks something on each correct answer when streak >= 10", () => {
+    let state = loadState();
+    const initialVariants = state.unlockedVariants.length;
+
+    // Get to streak of 10
+    for (let i = 0; i < 10; i++) {
+      state = recordQuestion(state, {
+        timestamp: Date.now(),
+        questionType: "two-note",
+        noteA: "C4",
+        noteB: "G4",
+        targetNote: "C",
+        otherNote: "G",
+        correct: true,
+        wasFirstInStreak: true,
+        variantKey: "C-G:two-note:4-4",
+      });
+    }
+
+    // Should have unlocked something at streak 10
+    expect(state.unlockedVariants.length).toBeGreaterThan(initialVariants);
+    const variantsAt10 = state.unlockedVariants.length;
+
+    // Another correct answer should unlock another thing
+    state = recordQuestion(state, {
+      timestamp: Date.now(),
+      questionType: "two-note",
+      noteA: "C4",
+      noteB: "G4",
+      targetNote: "C",
+      otherNote: "G",
+      correct: true,
+      wasFirstInStreak: true,
+      variantKey: "C-G:two-note:4-4",
+    });
+    expect(state.unlockedVariants.length).toBeGreaterThan(variantsAt10);
+  });
+
+  it("stops accelerated unlocking on wrong answer", () => {
+    let state = loadState();
+
+    // Get to streak of 10
+    for (let i = 0; i < 10; i++) {
+      state = recordQuestion(state, {
+        timestamp: Date.now(),
+        questionType: "two-note",
+        noteA: "C4",
+        noteB: "G4",
+        targetNote: "C",
+        otherNote: "G",
+        correct: true,
+        wasFirstInStreak: true,
+        variantKey: "C-G:two-note:4-4",
+      });
+    }
+
+    const variantsBeforeWrong = state.unlockedVariants.length;
+
+    // Wrong answer
+    state = recordQuestion(state, {
+      timestamp: Date.now(),
+      questionType: "two-note",
+      noteA: "C4",
+      noteB: "G4",
+      targetNote: "C",
+      otherNote: "G",
+      correct: false,
+      wasFirstInStreak: true,
+      variantKey: "C-G:two-note:4-4",
+    });
+
+    expect(state.globalCorrectStreak).toBe(0);
+
+    // Next correct answer shouldn't unlock (streak is only 1)
+    state = recordQuestion(state, {
+      timestamp: Date.now(),
+      questionType: "two-note",
+      noteA: "C4",
+      noteB: "G4",
+      targetNote: "C",
+      otherNote: "G",
+      correct: true,
+      wasFirstInStreak: true,
+      variantKey: "C-G:two-note:4-4",
+    });
+    expect(state.unlockedVariants.length).toBe(variantsBeforeWrong);
+  });
+});
