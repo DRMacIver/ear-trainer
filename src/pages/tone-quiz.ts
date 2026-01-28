@@ -1124,6 +1124,8 @@ function renderIntroPage(showBackLink: boolean): void {
           <li>Progress to <strong>single-note identification</strong>: Once you're reliable at comparing notes, you'll hear just one note and identify it directly.</li>
           <li><strong>Expanding vocabulary:</strong> You start with C and G. As you master notes, new ones are introduced.</li>
         </ol>
+
+        <p>Note: This is an experimental exercise, and is in fairly active development. I can't promise it will actually get you to perfect pitch, and the learning progression may be wildly off.</p>
       </div>
 
       <div class="intro-section">
