@@ -82,7 +82,7 @@ const NOTE_STICKY_MIN = 3;
 const NOTE_STICKY_MAX = 6;
 
 /** Show a temporary modal overlay indicating the note has changed */
-function showNoteChangeModal(note: FullTone): void {
+function showNoteChangeModal(note: FullTone, onDismiss?: () => void): void {
   // Remove any existing modal
   const existing = document.getElementById("note-change-modal");
   if (existing) existing.remove();
@@ -96,10 +96,13 @@ function showNoteChangeModal(note: FullTone): void {
   // Trigger entrance animation
   requestAnimationFrame(() => modal.classList.add("visible"));
 
-  // Remove after 2 seconds
+  // Remove after 2 seconds, then call callback
   setTimeout(() => {
     modal.classList.remove("visible");
-    setTimeout(() => modal.remove(), 300); // Wait for fade out
+    setTimeout(() => {
+      modal.remove();
+      if (onDismiss) onDismiss();
+    }, 300); // Wait for fade out
   }, 2000);
 }
 
@@ -797,9 +800,11 @@ function nextQuestion(): void {
   const isNewTarget = initQuestion();
   render();
   if (isNewTarget) {
-    showNoteChangeModal(question.targetNote);
+    // Show modal first, play notes after it dismisses
+    showNoteChangeModal(question.targetNote, playQuestionNotes);
+  } else {
+    playQuestionNotes();
   }
-  playQuestionNotes();
 }
 
 function renderIntroPage(showBackLink: boolean): void {
