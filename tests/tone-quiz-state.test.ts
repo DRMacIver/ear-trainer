@@ -24,7 +24,7 @@ import {
   selectOctavesForPair,
   pickRandomOctave,
   getNotePitch,
-  // New unlock system functions
+  // Pair utility functions
   normalizePair,
   getScalePosition,
   getNotesBetween,
@@ -38,10 +38,25 @@ import {
   processPendingUnlocks,
   checkAndQueueUnlocks,
   getLastIntroducedNote,
+  // Variant system functions
+  makeVariantKey,
+  parseVariantKey,
+  getAllTwoToneVariantsForPair,
+  getAllSingleNoteVariantsForPair,
+  getInitialVariant,
+  isVariantUnlocked,
+  getUnlockedVariantsForPair,
+  getUnlockedTwoToneVariants,
+  getUnlockedSingleNoteVariants,
+  getNextVariantToUnlock,
+  recordVariantResult,
+  checkNoteUnlock,
   NOTE_SEMITONES,
   AVAILABLE_OCTAVES,
   MASTERY_WINDOW,
   UNLOCK_COOLDOWN,
+  VARIANT_COMPLETION_STREAK,
+  NOTE_UNLOCK_COOLDOWN,
   Grade,
   FullTone,
   FULL_TONES,
@@ -100,6 +115,10 @@ describe("loadState / saveState / clearState", () => {
     expect(state.learningVocabulary).toEqual(["C", "G"]);
     expect(state.currentTarget).toBeNull();
     expect(state.correctStreak).toBe(0);
+    // New variant system fields
+    expect(state.unlockedVariants).toEqual(["C-G:two-note:4-4"]);
+    expect(state.variantStreaks).toEqual({});
+    expect(state.recentSingleNoteResults).toEqual([]);
   });
 
   it("saves and loads state correctly", () => {
@@ -659,21 +678,26 @@ describe("isSingleNotePairUnlocked and getUnlockedSingleNotePairs", () => {
     localStorageMock.clear();
   });
 
-  it("returns false for unlocked pair when list is empty", () => {
+  it("returns false when no single-note variants are unlocked", () => {
     const state = loadState();
+    // Initial state has only two-note variants
     expect(isSingleNotePairUnlocked(state, "C", "G")).toBe(false);
   });
 
-  it("returns true when pair is in unlocked list", () => {
+  it("returns true when single-note variant is unlocked", () => {
     let state = loadState();
-    state.unlockedSingleNotePairs = ["C-G"];
+    state.unlockedVariants = [...state.unlockedVariants, "C-G:single-note:4"];
     expect(isSingleNotePairUnlocked(state, "C", "G")).toBe(true);
     expect(isSingleNotePairUnlocked(state, "G", "C")).toBe(true); // Order shouldn't matter
   });
 
   it("getUnlockedSingleNotePairs returns pairs as arrays", () => {
     let state = loadState();
-    state.unlockedSingleNotePairs = ["C-G", "C-E"];
+    state.unlockedVariants = [
+      "C-G:two-note:4-4",
+      "C-G:single-note:4",
+      "C-E:single-note:4",
+    ];
     const pairs = getUnlockedSingleNotePairs(state);
     expect(pairs.length).toBe(2);
     expect(pairs).toContainEqual(["C", "G"]);
@@ -714,23 +738,22 @@ describe("queueUnlock", () => {
     localStorageMock.clear();
   });
 
-  it("adds unlock to pending queue", () => {
+  it("adds note unlock to pending queue", () => {
     let state = loadState();
-    state = queueUnlock(state, { type: "single-note-pair", value: "C-G" });
+    state = queueUnlock(state, { type: "note", value: "E" });
     expect(state.pendingUnlocks.length).toBe(1);
-    expect(state.pendingUnlocks[0]).toEqual({ type: "single-note-pair", value: "C-G" });
+    expect(state.pendingUnlocks[0]).toEqual({ type: "note", value: "E" });
   });
 
   it("does not add duplicate unlock", () => {
     let state = loadState();
-    state = queueUnlock(state, { type: "single-note-pair", value: "C-G" });
-    state = queueUnlock(state, { type: "single-note-pair", value: "C-G" });
+    state = queueUnlock(state, { type: "note", value: "E" });
+    state = queueUnlock(state, { type: "note", value: "E" });
     expect(state.pendingUnlocks.length).toBe(1);
   });
 
-  it("does not add unlock if already unlocked", () => {
+  it("ignores single-note-pair type (deprecated)", () => {
     let state = loadState();
-    state.unlockedSingleNotePairs = ["C-G"];
     state = queueUnlock(state, { type: "single-note-pair", value: "C-G" });
     expect(state.pendingUnlocks.length).toBe(0);
   });
@@ -756,20 +779,10 @@ describe("processPendingUnlocks", () => {
 
   it("does nothing when cooldown not met", () => {
     let state = loadState();
-    state.pendingUnlocks = [{ type: "single-note-pair", value: "C-G" }];
+    state.pendingUnlocks = [{ type: "note", value: "E" }];
     state.questionsSinceLastUnlock = UNLOCK_COOLDOWN - 1;
     const newState = processPendingUnlocks(state);
     expect(newState.pendingUnlocks.length).toBe(1);
-  });
-
-  it("processes single-note-pair unlock when cooldown met", () => {
-    let state = loadState();
-    state.pendingUnlocks = [{ type: "single-note-pair", value: "C-G" }];
-    state.questionsSinceLastUnlock = UNLOCK_COOLDOWN;
-    const newState = processPendingUnlocks(state);
-    expect(newState.unlockedSingleNotePairs).toContain("C-G");
-    expect(newState.pendingUnlocks.length).toBe(0);
-    expect(newState.questionsSinceLastUnlock).toBe(0);
   });
 
   it("processes note unlock when cooldown met", () => {
@@ -780,37 +793,34 @@ describe("processPendingUnlocks", () => {
     expect(newState.learningVocabulary).toContain("E");
     expect(newState.pendingUnlocks.length).toBe(0);
     expect(newState.questionsSinceLastUnlock).toBe(0);
+    // Should also add initial variants for new note
+    expect(newState.unlockedVariants).toContain("C-E:two-note:4-4");
+    expect(newState.unlockedVariants).toContain("E-G:two-note:4-4");
+  });
+
+  it("skips deprecated single-note-pair type", () => {
+    let state = loadState();
+    state.pendingUnlocks = [{ type: "single-note-pair", value: "C-G" }];
+    state.questionsSinceLastUnlock = UNLOCK_COOLDOWN;
+    const newState = processPendingUnlocks(state);
+    expect(newState.pendingUnlocks.length).toBe(0);
+    // No single-note variant should be unlocked
+    expect(newState.unlockedVariants.some(v => v.includes(":single-note:"))).toBe(false);
   });
 });
 
-describe("checkAndQueueUnlocks", () => {
+describe("checkAndQueueUnlocks (legacy, now just processes pending)", () => {
   beforeEach(() => {
     localStorageMock.clear();
   });
 
-  it("queues single-note unlock when two-tone mastered", () => {
+  it("processes pending note unlocks when cooldown met", () => {
     let state = loadState();
-    // Need 10 results with 9 correct for mastery
-    state.performance = {
-      C: { G: [true, true, true, true, true] },
-      G: { C: [true, true, true, true, true] },
-    };
+    state.pendingUnlocks = [{ type: "note", value: "E" }];
+    state.questionsSinceLastUnlock = UNLOCK_COOLDOWN;
     const newState = checkAndQueueUnlocks(state);
-    // Should queue single-note-pair unlock
-    expect(newState.pendingUnlocks.some(u => u.type === "single-note-pair" && u.value === "C-G")).toBe(true);
-  });
-
-  it("queues note unlock when single-note mastered", () => {
-    let state = loadState();
-    state.unlockedSingleNotePairs = ["C-G"];
-    // Need 10 results with 9 correct for mastery
-    state.singleNotePerformance = {
-      C: { G: [true, true, true, true, true] },
-      G: { C: [true, true, true, true, true] },
-    };
-    const newState = checkAndQueueUnlocks(state);
-    // Should queue E (first note between C-G in LEARNING_ORDER)
-    expect(newState.pendingUnlocks.some(u => u.type === "note" && u.value === "E")).toBe(true);
+    expect(newState.learningVocabulary).toContain("E");
+    expect(newState.pendingUnlocks.length).toBe(0);
   });
 });
 
@@ -1405,5 +1415,288 @@ describe("selectOctavesForPair", () => {
 
     // Should select multiple different valid pairs
     expect(results.size).toBeGreaterThan(1);
+  });
+});
+
+// ============================================================================
+// Variant-Based Progression System Tests
+// ============================================================================
+
+describe("makeVariantKey and parseVariantKey", () => {
+  it("creates two-note variant keys correctly", () => {
+    const key = makeVariantKey("C-G", "two-note", [4, 4]);
+    expect(key).toBe("C-G:two-note:4-4");
+  });
+
+  it("sorts octaves in two-note variant keys", () => {
+    const key1 = makeVariantKey("C-G", "two-note", [3, 4]);
+    const key2 = makeVariantKey("C-G", "two-note", [4, 3]);
+    expect(key1).toBe("C-G:two-note:3-4");
+    expect(key2).toBe("C-G:two-note:3-4");
+  });
+
+  it("creates single-note variant keys correctly", () => {
+    const key = makeVariantKey("C-G", "single-note", 4);
+    expect(key).toBe("C-G:single-note:4");
+  });
+
+  it("parses two-note variant keys correctly", () => {
+    const parsed = parseVariantKey("C-G:two-note:3-4");
+    expect(parsed.pair).toBe("C-G");
+    expect(parsed.questionType).toBe("two-note");
+    expect(parsed.octaves).toEqual([3, 4]);
+  });
+
+  it("parses single-note variant keys correctly", () => {
+    const parsed = parseVariantKey("C-G:single-note:4");
+    expect(parsed.pair).toBe("C-G");
+    expect(parsed.questionType).toBe("single-note");
+    expect(parsed.octaves).toBe(4);
+  });
+});
+
+describe("getAllTwoToneVariantsForPair and getAllSingleNoteVariantsForPair", () => {
+  it("returns all two-tone variants for a pair", () => {
+    const variants = getAllTwoToneVariantsForPair("C-G");
+    expect(variants).toHaveLength(5);
+    expect(variants).toContain("C-G:two-note:4-4");
+    expect(variants).toContain("C-G:two-note:3-3");
+    expect(variants).toContain("C-G:two-note:5-5");
+    expect(variants).toContain("C-G:two-note:3-4");
+    expect(variants).toContain("C-G:two-note:4-5");
+  });
+
+  it("returns all single-note variants for a pair", () => {
+    const variants = getAllSingleNoteVariantsForPair("C-G");
+    expect(variants).toHaveLength(3);
+    expect(variants).toContain("C-G:single-note:4");
+    expect(variants).toContain("C-G:single-note:3");
+    expect(variants).toContain("C-G:single-note:5");
+  });
+});
+
+describe("getInitialVariant", () => {
+  it("returns octave 4 two-note variant", () => {
+    expect(getInitialVariant("C-G")).toBe("C-G:two-note:4-4");
+  });
+});
+
+describe("isVariantUnlocked and variant getters", () => {
+  beforeEach(() => {
+    localStorageMock.clear();
+  });
+
+  it("isVariantUnlocked returns true for initial variant", () => {
+    const state = loadState();
+    expect(isVariantUnlocked(state, "C-G:two-note:4-4")).toBe(true);
+  });
+
+  it("isVariantUnlocked returns false for locked variant", () => {
+    const state = loadState();
+    expect(isVariantUnlocked(state, "C-G:two-note:3-3")).toBe(false);
+  });
+
+  it("getUnlockedVariantsForPair returns correct variants", () => {
+    let state = loadState();
+    state.unlockedVariants = ["C-G:two-note:4-4", "C-G:two-note:3-3", "C-E:two-note:4-4"];
+    const variants = getUnlockedVariantsForPair(state, "C-G");
+    expect(variants).toHaveLength(2);
+    expect(variants).toContain("C-G:two-note:4-4");
+    expect(variants).toContain("C-G:two-note:3-3");
+  });
+
+  it("getUnlockedTwoToneVariants filters correctly", () => {
+    let state = loadState();
+    state.unlockedVariants = ["C-G:two-note:4-4", "C-G:single-note:4"];
+    const variants = getUnlockedTwoToneVariants(state);
+    expect(variants).toHaveLength(1);
+    expect(variants).toContain("C-G:two-note:4-4");
+  });
+
+  it("getUnlockedSingleNoteVariants filters correctly", () => {
+    let state = loadState();
+    state.unlockedVariants = ["C-G:two-note:4-4", "C-G:single-note:4"];
+    const variants = getUnlockedSingleNoteVariants(state);
+    expect(variants).toHaveLength(1);
+    expect(variants).toContain("C-G:single-note:4");
+  });
+});
+
+describe("getNextVariantToUnlock", () => {
+  beforeEach(() => {
+    localStorageMock.clear();
+  });
+
+  it("returns next two-tone variant in order", () => {
+    let state = loadState();
+    // Only 4-4 is unlocked initially
+    const next = getNextVariantToUnlock(state, "C-G");
+    expect(next).toBe("C-G:two-note:3-3");
+  });
+
+  it("returns first single-note variant after all two-tone unlocked", () => {
+    let state = loadState();
+    state.unlockedVariants = [
+      "C-G:two-note:4-4",
+      "C-G:two-note:3-3",
+      "C-G:two-note:5-5",
+      "C-G:two-note:3-4",
+      "C-G:two-note:4-5",
+    ];
+    const next = getNextVariantToUnlock(state, "C-G");
+    expect(next).toBe("C-G:single-note:4");
+  });
+
+  it("returns null when all variants unlocked", () => {
+    let state = loadState();
+    state.unlockedVariants = [
+      "C-G:two-note:4-4",
+      "C-G:two-note:3-3",
+      "C-G:two-note:5-5",
+      "C-G:two-note:3-4",
+      "C-G:two-note:4-5",
+      "C-G:single-note:4",
+      "C-G:single-note:3",
+      "C-G:single-note:5",
+    ];
+    const next = getNextVariantToUnlock(state, "C-G");
+    expect(next).toBeNull();
+  });
+});
+
+describe("recordVariantResult", () => {
+  beforeEach(() => {
+    localStorageMock.clear();
+  });
+
+  it("increments streak on correct answer", () => {
+    let state = loadState();
+    state = recordVariantResult(state, "C-G:two-note:4-4", true);
+    expect(state.variantStreaks["C-G:two-note:4-4"]).toBe(1);
+    state = recordVariantResult(state, "C-G:two-note:4-4", true);
+    expect(state.variantStreaks["C-G:two-note:4-4"]).toBe(2);
+  });
+
+  it("resets streak on wrong answer", () => {
+    let state = loadState();
+    state.variantStreaks = { "C-G:two-note:4-4": 3 };
+    state = recordVariantResult(state, "C-G:two-note:4-4", false);
+    expect(state.variantStreaks["C-G:two-note:4-4"]).toBe(0);
+  });
+
+  it("unlocks next variant after VARIANT_COMPLETION_STREAK correct", () => {
+    let state = loadState();
+    // Get 5 correct in a row
+    for (let i = 0; i < VARIANT_COMPLETION_STREAK; i++) {
+      state = recordVariantResult(state, "C-G:two-note:4-4", true);
+    }
+    // Should have unlocked the next variant (3-3)
+    expect(state.unlockedVariants).toContain("C-G:two-note:3-3");
+    // Streak should be reset to prevent continuous triggering
+    expect(state.variantStreaks["C-G:two-note:4-4"]).toBe(0);
+  });
+});
+
+describe("checkNoteUnlock", () => {
+  beforeEach(() => {
+    localStorageMock.clear();
+  });
+
+  it("does nothing when cooldown not met", () => {
+    let state = loadState();
+    state.recentSingleNoteResults = Array(20).fill(true);
+    state.questionsSinceLastUnlock = NOTE_UNLOCK_COOLDOWN - 1;
+    const newState = checkNoteUnlock(state);
+    expect(newState.learningVocabulary).toEqual(["C", "G"]);
+  });
+
+  it("does nothing with insufficient questions", () => {
+    let state = loadState();
+    state.recentSingleNoteResults = Array(5).fill(true);
+    state.questionsSinceLastUnlock = NOTE_UNLOCK_COOLDOWN;
+    const newState = checkNoteUnlock(state);
+    expect(newState.learningVocabulary).toEqual(["C", "G"]);
+  });
+
+  it("does nothing with insufficient correct answers", () => {
+    let state = loadState();
+    // 16/20 correct (80%) - below threshold
+    state.recentSingleNoteResults = [
+      ...Array(16).fill(true),
+      ...Array(4).fill(false),
+    ];
+    state.questionsSinceLastUnlock = NOTE_UNLOCK_COOLDOWN;
+    const newState = checkNoteUnlock(state);
+    expect(newState.learningVocabulary).toEqual(["C", "G"]);
+  });
+
+  it("unlocks next note when criteria met", () => {
+    let state = loadState();
+    // 18/20 correct (90%) - meets threshold
+    state.recentSingleNoteResults = [
+      ...Array(18).fill(true),
+      ...Array(2).fill(false),
+    ];
+    state.questionsSinceLastUnlock = NOTE_UNLOCK_COOLDOWN;
+    const newState = checkNoteUnlock(state);
+    expect(newState.learningVocabulary).toContain("E");
+    expect(newState.questionsSinceLastUnlock).toBe(0);
+    // Should also add initial variants for new note
+    expect(newState.unlockedVariants).toContain("C-E:two-note:4-4");
+    expect(newState.unlockedVariants).toContain("E-G:two-note:4-4");
+  });
+});
+
+describe("recordQuestion with variant tracking", () => {
+  beforeEach(() => {
+    localStorageMock.clear();
+  });
+
+  it("tracks single-note results for note unlock", () => {
+    let state = loadState();
+    state = recordQuestion(state, {
+      timestamp: Date.now(),
+      questionType: "single-note",
+      noteA: "C4",
+      noteB: "",
+      targetNote: "C",
+      otherNote: "G",
+      correct: true,
+      wasFirstInStreak: true,
+      variantKey: "C-G:single-note:4",
+    });
+    expect(state.recentSingleNoteResults).toEqual([true]);
+  });
+
+  it("updates variant streak when variantKey provided", () => {
+    let state = loadState();
+    state = recordQuestion(state, {
+      timestamp: Date.now(),
+      questionType: "two-note",
+      noteA: "C4",
+      noteB: "G4",
+      targetNote: "C",
+      otherNote: "G",
+      correct: true,
+      wasFirstInStreak: true,
+      variantKey: "C-G:two-note:4-4",
+    });
+    expect(state.variantStreaks["C-G:two-note:4-4"]).toBe(1);
+  });
+
+  it("does not update variant streak for retry (wasFirstInStreak=false)", () => {
+    let state = loadState();
+    state = recordQuestion(state, {
+      timestamp: Date.now(),
+      questionType: "two-note",
+      noteA: "C4",
+      noteB: "G4",
+      targetNote: "C",
+      otherNote: "G",
+      correct: true,
+      wasFirstInStreak: false,
+      variantKey: "C-G:two-note:4-4",
+    });
+    expect(state.variantStreaks["C-G:two-note:4-4"]).toBeUndefined();
   });
 });

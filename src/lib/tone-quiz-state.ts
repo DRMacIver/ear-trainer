@@ -5,7 +5,7 @@
 
 import { Card, Grade, createDeck } from "./fsrs.js";
 
-const STORAGE_KEY = "tone-quiz-state-v2";
+const STORAGE_KEY = "tone-quiz-state-v3";
 const deck = createDeck();
 
 export { Grade };
@@ -41,6 +41,26 @@ export const MASTERY_THRESHOLD = 9;
 /** Minimum questions between any unlocks */
 export const UNLOCK_COOLDOWN = 20;
 
+// ============================================================================
+// Variant-Based Progression System Constants
+// ============================================================================
+
+/** Correct in a row to complete a variant and unlock next */
+export const VARIANT_COMPLETION_STREAK = 5;
+/** Look at last N single-note questions for new note unlock */
+export const NOTE_UNLOCK_WINDOW = 20;
+/** Need this many correct out of NOTE_UNLOCK_WINDOW (90%) */
+export const NOTE_UNLOCK_THRESHOLD = 18;
+/** Must have done at least this many single-note questions */
+export const NOTE_UNLOCK_MIN_QUESTIONS = 10;
+/** Questions between note unlocks (cooldown) */
+export const NOTE_UNLOCK_COOLDOWN = 20;
+
+/** Unlock order for two-tone variants (octave pairs) */
+export const TWO_TONE_UNLOCK_ORDER = ["4-4", "3-3", "5-5", "3-4", "4-5"] as const;
+/** Unlock order for single-note variants (octaves) */
+export const SINGLE_NOTE_UNLOCK_ORDER = ["4", "3", "5"] as const;
+
 export type QuestionType = "two-note" | "single-note";
 
 /** Pending unlock types */
@@ -59,6 +79,7 @@ export interface QuestionRecord {
   correct: boolean;
   wasFirstInStreak: boolean; // Only first-in-streak counts for familiarity
   timeMs?: number;
+  variantKey?: string; // Variant key for progression tracking (e.g., "C-G:two-note:4-4")
 }
 
 /** FSRS card state for a target-other pair */
@@ -92,10 +113,14 @@ export interface ToneQuizState {
   correctStreak: number; // Consecutive correct answers on current target
   isFirstOnTarget: boolean; // Whether next question is first on this target
 
-  // Unlock-based progression system
-  unlockedSingleNotePairs: string[]; // Normalized pairs that have unlocked single-note questions ["C-G", ...]
-  pendingUnlocks: PendingUnlock[]; // Queue of unlocks waiting for cooldown
-  questionsSinceLastUnlock: number; // Counter for unlock cooldown
+  // Variant-based progression system
+  unlockedVariants: string[]; // Variant keys that are unlocked ["C-G:two-note:4-4", ...]
+  variantStreaks: Record<string, number>; // variant key -> current streak for completion
+  recentSingleNoteResults: boolean[]; // Last NOTE_UNLOCK_WINDOW results across all single-note questions
+
+  // Pending note unlocks (only for new notes, not variant unlocks)
+  pendingUnlocks: PendingUnlock[]; // Queue of note unlocks waiting for cooldown
+  questionsSinceLastUnlock: number; // Counter for note unlock cooldown
 
   // FSRS spaced repetition state
   pairCards: Record<string, TonePairCard>; // "target-other" -> card state
@@ -113,7 +138,10 @@ function createInitialState(): ToneQuizState {
     currentTargetOctave: null,
     correctStreak: 0,
     isFirstOnTarget: true,
-    unlockedSingleNotePairs: [],
+    // Variant-based progression: start with only C-G:two-note:4-4 unlocked
+    unlockedVariants: ["C-G:two-note:4-4"],
+    variantStreaks: {},
+    recentSingleNoteResults: [],
     pendingUnlocks: [],
     questionsSinceLastUnlock: 0,
     pairCards: {},
@@ -261,6 +289,232 @@ export function getClosestVocabularyNotes(
 }
 
 // ============================================================================
+// Variant-Based Progression System Functions
+// ============================================================================
+
+/**
+ * Create a variant key from components.
+ * Two-tone: "C-G:two-note:3-4" (pair:type:octaveA-octaveB, octaves sorted)
+ * Single-note: "C-G:single-note:4" (pair:type:octave)
+ */
+export function makeVariantKey(
+  pair: string,
+  questionType: QuestionType,
+  octaves: number | [number, number]
+): string {
+  if (questionType === "single-note") {
+    return `${pair}:single-note:${octaves}`;
+  }
+  const [o1, o2] = octaves as [number, number];
+  const sortedOctaves = o1 <= o2 ? `${o1}-${o2}` : `${o2}-${o1}`;
+  return `${pair}:two-note:${sortedOctaves}`;
+}
+
+/**
+ * Parse a variant key back to its components.
+ */
+export function parseVariantKey(key: string): {
+  pair: string;
+  questionType: QuestionType;
+  octaves: number | [number, number];
+} {
+  const parts = key.split(":");
+  const pair = parts[0];
+  const questionType = parts[1] as QuestionType;
+  const octavePart = parts[2];
+
+  if (questionType === "single-note") {
+    return { pair, questionType, octaves: parseInt(octavePart, 10) };
+  }
+  const [o1, o2] = octavePart.split("-").map((s) => parseInt(s, 10));
+  return { pair, questionType, octaves: [o1, o2] as [number, number] };
+}
+
+/**
+ * Get all possible two-tone variants for a pair.
+ * Includes same-octave (4-4, 3-3, 5-5) and cross-octave (3-4, 4-5).
+ * Note: 3-5 is not allowed (non-adjacent octaves).
+ */
+export function getAllTwoToneVariantsForPair(pair: string): string[] {
+  return TWO_TONE_UNLOCK_ORDER.map((octaves) => `${pair}:two-note:${octaves}`);
+}
+
+/**
+ * Get all possible single-note variants for a pair.
+ */
+export function getAllSingleNoteVariantsForPair(pair: string): string[] {
+  return SINGLE_NOTE_UNLOCK_ORDER.map((octave) => `${pair}:single-note:${octave}`);
+}
+
+/**
+ * Get all possible variants for a pair (two-tone + single-note).
+ */
+export function getAllVariantsForPair(pair: string): string[] {
+  return [
+    ...getAllTwoToneVariantsForPair(pair),
+    ...getAllSingleNoteVariantsForPair(pair),
+  ];
+}
+
+/**
+ * Get the initial unlocked variant for a pair (just octave 4 two-tone).
+ */
+export function getInitialVariant(pair: string): string {
+  return `${pair}:two-note:4-4`;
+}
+
+/**
+ * Check if a variant is unlocked.
+ */
+export function isVariantUnlocked(state: ToneQuizState, variantKey: string): boolean {
+  return state.unlockedVariants.includes(variantKey);
+}
+
+/**
+ * Get all unlocked variants for a specific pair.
+ */
+export function getUnlockedVariantsForPair(
+  state: ToneQuizState,
+  pair: string
+): string[] {
+  return state.unlockedVariants.filter((v) => v.startsWith(`${pair}:`));
+}
+
+/**
+ * Get all unlocked two-tone variants across all pairs.
+ */
+export function getUnlockedTwoToneVariants(state: ToneQuizState): string[] {
+  return state.unlockedVariants.filter((v) => v.includes(":two-note:"));
+}
+
+/**
+ * Get all unlocked single-note variants across all pairs.
+ */
+export function getUnlockedSingleNoteVariants(state: ToneQuizState): string[] {
+  return state.unlockedVariants.filter((v) => v.includes(":single-note:"));
+}
+
+/**
+ * Get the next variant to unlock for a pair, based on the unlock progression.
+ * Order: two-tone same-octave -> two-tone cross-octave -> single-note
+ * Returns null if all variants are already unlocked.
+ */
+export function getNextVariantToUnlock(
+  state: ToneQuizState,
+  pair: string
+): string | null {
+  const unlockedForPair = new Set(getUnlockedVariantsForPair(state, pair));
+
+  // Check two-tone variants first
+  for (const octaves of TWO_TONE_UNLOCK_ORDER) {
+    const variant = `${pair}:two-note:${octaves}`;
+    if (!unlockedForPair.has(variant)) {
+      return variant;
+    }
+  }
+
+  // Then single-note variants
+  for (const octave of SINGLE_NOTE_UNLOCK_ORDER) {
+    const variant = `${pair}:single-note:${octave}`;
+    if (!unlockedForPair.has(variant)) {
+      return variant;
+    }
+  }
+
+  return null; // All unlocked
+}
+
+/**
+ * Record a result for a variant, update streak, and possibly unlock next variant.
+ * Returns updated state.
+ */
+export function recordVariantResult(
+  state: ToneQuizState,
+  variantKey: string,
+  correct: boolean
+): ToneQuizState {
+  let newState = { ...state };
+
+  if (correct) {
+    // Increment streak
+    const currentStreak = state.variantStreaks[variantKey] ?? 0;
+    const newStreak = currentStreak + 1;
+    newState.variantStreaks = { ...state.variantStreaks, [variantKey]: newStreak };
+
+    // Check for completion (5 in a row)
+    if (newStreak >= VARIANT_COMPLETION_STREAK) {
+      const { pair } = parseVariantKey(variantKey);
+      const nextVariant = getNextVariantToUnlock(newState, pair);
+      if (nextVariant && !isVariantUnlocked(newState, nextVariant)) {
+        newState.unlockedVariants = [...newState.unlockedVariants, nextVariant];
+        // Reset streak for this variant so it doesn't keep triggering
+        newState.variantStreaks = { ...newState.variantStreaks, [variantKey]: 0 };
+      }
+    }
+  } else {
+    // Reset streak on wrong answer
+    newState.variantStreaks = { ...state.variantStreaks, [variantKey]: 0 };
+  }
+
+  return newState;
+}
+
+/**
+ * Check if a new note should be unlocked based on recent single-note performance.
+ * Criteria: 18/20 correct (90%) with at least 10 questions done, and cooldown met.
+ * Returns updated state with note added to vocabulary if unlocked.
+ */
+export function checkNoteUnlock(state: ToneQuizState): ToneQuizState {
+  // Check cooldown
+  if (state.questionsSinceLastUnlock < NOTE_UNLOCK_COOLDOWN) {
+    return state;
+  }
+
+  // Need at least NOTE_UNLOCK_MIN_QUESTIONS single-note questions
+  if (state.recentSingleNoteResults.length < NOTE_UNLOCK_MIN_QUESTIONS) {
+    return state;
+  }
+
+  // Take last NOTE_UNLOCK_WINDOW results
+  const recent = state.recentSingleNoteResults.slice(-NOTE_UNLOCK_WINDOW);
+  const correctCount = recent.filter(Boolean).length;
+
+  // Need NOTE_UNLOCK_THRESHOLD correct (18/20 = 90%)
+  if (recent.length < NOTE_UNLOCK_MIN_QUESTIONS || correctCount < NOTE_UNLOCK_THRESHOLD) {
+    return state;
+  }
+
+  // Find next note to unlock
+  const nextNote = getNextNoteToLearn(state);
+  if (!nextNote) {
+    return state; // All notes already learned
+  }
+
+  // Unlock the note and its initial variants with existing vocabulary notes
+  let newState: ToneQuizState = {
+    ...state,
+    learningVocabulary: [...state.learningVocabulary, nextNote],
+    questionsSinceLastUnlock: 0,
+  };
+
+  // Add initial variants for the new note paired with each existing vocab note
+  const newVariants: string[] = [];
+  for (const existingNote of state.learningVocabulary) {
+    const pair = normalizePair(nextNote, existingNote);
+    const initialVariant = getInitialVariant(pair);
+    if (!newState.unlockedVariants.includes(initialVariant)) {
+      newVariants.push(initialVariant);
+    }
+  }
+
+  if (newVariants.length > 0) {
+    newState.unlockedVariants = [...newState.unlockedVariants, ...newVariants];
+  }
+
+  return newState;
+}
+
+// ============================================================================
 // Performance Tracking Functions for Mastery
 // ============================================================================
 
@@ -314,6 +568,7 @@ export function isMastered(results: boolean[]): boolean {
 
 /**
  * Check if single-note questions are unlocked for this pair.
+ * In the variant system, this means at least one single-note variant is unlocked.
  */
 export function isSingleNotePairUnlocked(
   state: ToneQuizState,
@@ -321,16 +576,27 @@ export function isSingleNotePairUnlocked(
   b: FullTone
 ): boolean {
   const normalized = normalizePair(a, b);
-  return state.unlockedSingleNotePairs.includes(normalized);
+  // Check if any single-note variant for this pair is unlocked
+  return state.unlockedVariants.some(
+    (v) => v.startsWith(`${normalized}:single-note:`)
+  );
 }
 
 /**
  * Get all unlocked single-note pairs as [FullTone, FullTone][].
+ * Returns unique pairs that have at least one single-note variant unlocked.
  */
 export function getUnlockedSingleNotePairs(
   state: ToneQuizState
 ): Array<[FullTone, FullTone]> {
-  return state.unlockedSingleNotePairs.map((pair) => {
+  const pairsSet = new Set<string>();
+  for (const variant of state.unlockedVariants) {
+    if (variant.includes(":single-note:")) {
+      const pair = variant.split(":")[0];
+      pairsSet.add(pair);
+    }
+  }
+  return Array.from(pairsSet).map((pair) => {
     const [a, b] = pair.split("-") as [FullTone, FullTone];
     return [a, b];
   });
@@ -367,24 +633,25 @@ export function getNextNoteToBetween(
 }
 
 /**
- * Queue an unlock (doesn't apply immediately).
+ * Queue a note unlock (doesn't apply immediately due to cooldown).
+ * Note: Variant unlocks happen immediately via recordVariantResult.
+ * This is only for note unlocks which need user notification.
  */
 export function queueUnlock(
   state: ToneQuizState,
   unlock: PendingUnlock
 ): ToneQuizState {
+  // Only process note unlocks (variant unlocks are handled separately)
+  if (unlock.type !== "note") return state;
+
   // Check if already queued
   const alreadyQueued = state.pendingUnlocks.some(
     (u) => u.type === unlock.type && u.value === unlock.value
   );
   if (alreadyQueued) return state;
 
-  // Check if already unlocked/in vocab
-  if (unlock.type === "single-note-pair") {
-    if (state.unlockedSingleNotePairs.includes(unlock.value)) return state;
-  } else {
-    if (state.learningVocabulary.includes(unlock.value as FullTone)) return state;
-  }
+  // Check if already in vocabulary
+  if (state.learningVocabulary.includes(unlock.value as FullTone)) return state;
 
   return {
     ...state,
@@ -393,8 +660,8 @@ export function queueUnlock(
 }
 
 /**
- * Process pending unlocks if cooldown allows.
- * Returns updated state with unlock applied (if any).
+ * Process pending note unlocks if cooldown allows.
+ * Returns updated state with note added to vocabulary (if any).
  */
 export function processPendingUnlocks(state: ToneQuizState): ToneQuizState {
   if (state.pendingUnlocks.length === 0) return state;
@@ -403,24 +670,32 @@ export function processPendingUnlocks(state: ToneQuizState): ToneQuizState {
   // Pop first item from queue
   const [unlock, ...remaining] = state.pendingUnlocks;
 
+  // Only handle note unlocks (single-note-pair is deprecated)
+  if (unlock.type !== "note") {
+    return { ...state, pendingUnlocks: remaining };
+  }
+
+  const newNote = unlock.value as FullTone;
+
   let newState: ToneQuizState = {
     ...state,
     pendingUnlocks: remaining,
     questionsSinceLastUnlock: 0,
+    learningVocabulary: [...state.learningVocabulary, newNote],
   };
 
-  if (unlock.type === "single-note-pair") {
-    // Silent unlock - just add to unlocked pairs
-    newState = {
-      ...newState,
-      unlockedSingleNotePairs: [...newState.unlockedSingleNotePairs, unlock.value],
-    };
-  } else {
-    // Note unlock - add to vocabulary (triggers introduction screen in UI)
-    newState = {
-      ...newState,
-      learningVocabulary: [...newState.learningVocabulary, unlock.value as FullTone],
-    };
+  // Add initial variants for the new note paired with each existing vocab note
+  const newVariants: string[] = [];
+  for (const existingNote of state.learningVocabulary) {
+    const pair = normalizePair(newNote, existingNote);
+    const initialVariant = getInitialVariant(pair);
+    if (!newState.unlockedVariants.includes(initialVariant)) {
+      newVariants.push(initialVariant);
+    }
+  }
+
+  if (newVariants.length > 0) {
+    newState.unlockedVariants = [...newState.unlockedVariants, ...newVariants];
   }
 
   return newState;
@@ -429,47 +704,12 @@ export function processPendingUnlocks(state: ToneQuizState): ToneQuizState {
 /**
  * Check all pairs for newly earned unlocks and queue them.
  * Called after recording each question.
+ * Note: Variant unlocks happen via recordVariantResult. This function
+ * is kept for backwards compatibility and note unlock queueing.
  */
 export function checkAndQueueUnlocks(state: ToneQuizState): ToneQuizState {
-  let newState = state;
-  const vocab = state.learningVocabulary;
-
-  // Check each pair in vocabulary
-  for (let i = 0; i < vocab.length; i++) {
-    for (let j = i + 1; j < vocab.length; j++) {
-      const a = vocab[i];
-      const b = vocab[j];
-      const normalized = normalizePair(a, b);
-
-      if (!isSingleNotePairUnlocked(newState, a, b)) {
-        // Check if two-tone mastery achieved
-        const twoToneResults = getPairTwoToneResults(newState, a, b);
-        if (isMastered(twoToneResults)) {
-          newState = queueUnlock(newState, {
-            type: "single-note-pair",
-            value: normalized,
-          });
-        }
-      } else {
-        // Single-note is unlocked, check for single-note mastery
-        const singleNoteResults = getPairSingleNoteResults(newState, a, b);
-        if (isMastered(singleNoteResults)) {
-          const nextNote = getNextNoteToBetween(newState, a, b);
-          if (nextNote) {
-            newState = queueUnlock(newState, {
-              type: "note",
-              value: nextNote,
-            });
-          }
-        }
-      }
-    }
-  }
-
-  // Process pending unlocks if cooldown allows
-  newState = processPendingUnlocks(newState);
-
-  return newState;
+  // Process pending note unlocks if cooldown allows
+  return processPendingUnlocks(state);
 }
 
 /**
@@ -723,6 +963,10 @@ export function recordQuestion(
         ...newState.singleNotePerformance[target][other],
         record.correct,
       ];
+
+      // Track recent single-note results for note unlock (cap at NOTE_UNLOCK_WINDOW)
+      const recentResults = [...newState.recentSingleNoteResults, record.correct];
+      newState.recentSingleNoteResults = recentResults.slice(-NOTE_UNLOCK_WINDOW);
     } else {
       // Track two-note performance
       if (!newState.performance[target]) {
@@ -740,9 +984,19 @@ export function recordQuestion(
     // Update FSRS state for this pair (both question types)
     const grade = record.correct ? Grade.GOOD : Grade.AGAIN;
     newState = recordPairReview(newState, target, other, grade);
+
+    // Update variant streak for progression (if variant key provided)
+    if (record.variantKey) {
+      newState = recordVariantResult(newState, record.variantKey, record.correct);
+    }
   }
 
-  // Check for newly earned unlocks and process pending unlocks
+  // Check for note unlocks based on single-note performance
+  if (record.questionType === "single-note" && record.wasFirstInStreak) {
+    newState = checkNoteUnlock(newState);
+  }
+
+  // Process pending note unlocks if cooldown allows
   newState = checkAndQueueUnlocks(newState);
 
   return newState;

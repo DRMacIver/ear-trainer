@@ -13,14 +13,17 @@ import {
   randomizeOrder,
   recordQuestion,
   selectTargetNote,
-  selectOctavesForPair,
   pickRandomOctave,
   updateStreak,
   maybeStartNewSession,
   getRepeatProbability,
   selectMostUrgentPair,
-  getUnlockedSingleNotePairs,
   getLastIntroducedNote,
+  getUnlockedTwoToneVariants,
+  getUnlockedSingleNoteVariants,
+  parseVariantKey,
+  makeVariantKey,
+  normalizePair,
   ToneQuizState,
   FullTone,
   FULL_TONES,
@@ -56,6 +59,8 @@ interface QuestionState {
   startTime: number;
   // For single-note questions: which option is displayed first (randomized)
   displayOrder: [FullTone, FullTone];
+  // Variant key for progression tracking
+  variantKey: string;
 }
 
 // Introduction mode state (for new notes)
@@ -93,14 +98,16 @@ function shuffleArray<T>(array: T[]): void {
   }
 }
 
-/** Start a single-note cycle by populating the queue with all notes from ready pairs */
+/** Start a single-note cycle by populating the queue with all notes from unlocked variants */
 function startSingleNoteCycle(): void {
-  const readyPairs = getUnlockedSingleNotePairs(persistentState);
-  if (readyPairs.length === 0) return;
+  const unlockedVariants = getUnlockedSingleNoteVariants(persistentState);
+  if (unlockedVariants.length === 0) return;
 
-  // Get all unique notes from ready pairs
+  // Get all unique notes from unlocked single-note variants
   const uniqueNotes = new Set<FullTone>();
-  for (const [a, b] of readyPairs) {
+  for (const variant of unlockedVariants) {
+    const { pair } = parseVariantKey(variant);
+    const [a, b] = pair.split("-") as [FullTone, FullTone];
     uniqueNotes.add(a);
     uniqueNotes.add(b);
   }
@@ -127,9 +134,9 @@ function initQuestion(): InitQuestionResult {
     return initSingleNoteQuestion();
   }
 
-  // Check if we should start a new single-note cycle
-  const readyPairs = getUnlockedSingleNotePairs(persistentState);
-  if (readyPairs.length > 0 && Math.random() < SINGLE_NOTE_CYCLE_CHANCE) {
+  // Check if we should start a new single-note cycle (if single-note variants are unlocked)
+  const singleNoteVariants = getUnlockedSingleNoteVariants(persistentState);
+  if (singleNoteVariants.length > 0 && Math.random() < SINGLE_NOTE_CYCLE_CHANCE) {
     startSingleNoteCycle();
     return initSingleNoteQuestion();
   }
@@ -156,6 +163,13 @@ function initSingleNoteQuestion(): {
   isNewTarget: boolean;
   introducedNote: FullTone | null;
 } {
+  // Get all unlocked single-note variants
+  const unlockedVariants = getUnlockedSingleNoteVariants(persistentState);
+  if (unlockedVariants.length === 0) {
+    // No single-note variants unlocked yet, fallback to two-note
+    return initQuestionNormal();
+  }
+
   // Pop the next note from the queue
   const noteToPlay = singleNoteQueue.pop();
 
@@ -164,26 +178,29 @@ function initSingleNoteQuestion(): {
     return initQuestionNormal();
   }
 
-  // Find a ready pair that includes this note
-  const readyPairs = getUnlockedSingleNotePairs(persistentState);
-  const matchingPairs = readyPairs.filter(
-    ([a, b]) => a === noteToPlay || b === noteToPlay
-  );
+  // Find variants that include this note
+  const matchingVariants = unlockedVariants.filter((v) => {
+    const { pair } = parseVariantKey(v);
+    const [a, b] = pair.split("-") as [FullTone, FullTone];
+    return a === noteToPlay || b === noteToPlay;
+  });
 
-  if (matchingPairs.length === 0) {
-    // No matching pair found, fallback to normal question
+  if (matchingVariants.length === 0) {
+    // No matching variant found, fallback to normal question
     return initQuestionNormal();
   }
 
-  // Pick a random matching pair
-  const [pairNote1, pairNote2] =
-    matchingPairs[Math.floor(Math.random() * matchingPairs.length)];
+  // Pick a random matching variant
+  const selectedVariant =
+    matchingVariants[Math.floor(Math.random() * matchingVariants.length)];
+  const { pair, octaves } = parseVariantKey(selectedVariant);
+  const [pairNote1, pairNote2] = pair.split("-") as [FullTone, FullTone];
 
   // The note we're playing is noteToPlay, the alternative is the other note in the pair
   const alternative = pairNote1 === noteToPlay ? pairNote2 : pairNote1;
 
-  // Pick a random octave from available octaves (3, 4, or 5)
-  const playedOctave = pickRandomOctave();
+  // Use the octave from the variant
+  const playedOctave = octaves as number;
   const playedWithOctave = `${noteToPlay}${playedOctave}`;
 
   // Randomize display order for the choice buttons
@@ -203,6 +220,7 @@ function initSingleNoteQuestion(): {
     countsForStreak: true,
     startTime: Date.now(),
     displayOrder,
+    variantKey: selectedVariant,
   };
 
   return { isNewTarget: false, introducedNote: null };
@@ -213,39 +231,45 @@ function initQuestionFromPair(
   targetNote: FullTone,
   otherNote: FullTone
 ): { isNewTarget: boolean; introducedNote: FullTone | null } {
-  // 50/50 decide which note should be higher in pitch
-  const targetIsHigher = Math.random() < 0.5;
-  const [higherNote, lowerNote] = targetIsHigher
-    ? [targetNote, otherNote]
-    : [otherNote, targetNote];
+  const pair = normalizePair(targetNote, otherNote);
 
-  // Get valid octave pairs and select one
-  const octavePairs = selectOctavesForPair(higherNote, lowerNote);
-  if (!octavePairs) {
-    // Fallback: use same octave if no valid pairs (shouldn't happen)
-    const fallbackOctave = pickRandomOctave();
-    return initTwoNoteQuestionWithOctaves(
-      targetNote,
-      otherNote,
-      fallbackOctave,
-      fallbackOctave
-    );
+  // Get unlocked two-tone variants for this pair
+  const unlockedVariants = getUnlockedTwoToneVariants(persistentState).filter(
+    (v) => v.startsWith(`${pair}:`)
+  );
+
+  if (unlockedVariants.length === 0) {
+    // Fallback: use the initial variant (4-4)
+    const variantKey = makeVariantKey(pair, "two-note", [4, 4]);
+    return initTwoNoteQuestionFromVariant(targetNote, otherNote, variantKey, true);
   }
 
-  const [higherOctave, lowerOctave] = octavePairs;
-  const targetOctave = targetIsHigher ? higherOctave : lowerOctave;
-  const otherOctave = targetIsHigher ? lowerOctave : higherOctave;
+  // Pick a random unlocked variant
+  const selectedVariant =
+    unlockedVariants[Math.floor(Math.random() * unlockedVariants.length)];
 
-  return initTwoNoteQuestionWithOctaves(targetNote, otherNote, targetOctave, otherOctave);
+  return initTwoNoteQuestionFromVariant(targetNote, otherNote, selectedVariant, true);
 }
 
-/** Helper: Initialize a two-note question with specific octaves */
-function initTwoNoteQuestionWithOctaves(
+/** Helper: Initialize a two-note question from a variant key */
+function initTwoNoteQuestionFromVariant(
   targetNote: FullTone,
   otherNote: FullTone,
-  targetOctave: number,
-  otherOctave: number
+  variantKey: string,
+  isFirstInStreak: boolean
 ): { isNewTarget: boolean; introducedNote: FullTone | null } {
+  const { octaves } = parseVariantKey(variantKey);
+  const [octave1, octave2] = octaves as [number, number];
+
+  // The pair in the variant key is alphabetically sorted, so we need to figure out
+  // which octave goes with which note
+  const pair = normalizePair(targetNote, otherNote);
+  const [pairNote1] = pair.split("-") as [FullTone, FullTone];
+
+  // octave1 goes with pairNote1, octave2 goes with pairNote2
+  const targetOctave = targetNote === pairNote1 ? octave1 : octave2;
+  const otherOctave = otherNote === pairNote1 ? octave1 : octave2;
+
   const targetWithOctave = `${targetNote}${targetOctave}`;
   const otherWithOctave = `${otherNote}${otherOctave}`;
 
@@ -279,87 +303,72 @@ function initTwoNoteQuestionWithOctaves(
     otherNote,
     hasAnswered: false,
     wasCorrect: null,
-    isFirstInStreak: true, // FSRS repeats count for tracking
+    isFirstInStreak,
     countsForStreak: true,
     startTime: Date.now(),
     displayOrder: [targetNote, otherNote], // Not used for two-note questions
+    variantKey,
   };
 
   return { isNewTarget, introducedNote: null };
 }
 
-/** Initialize question using normal selection (adaptive difficulty) */
+/** Initialize question using normal selection (variant-based) */
 function initQuestionNormal(): {
   isNewTarget: boolean;
   introducedNote: FullTone | null;
 } {
+  // Get all unlocked two-tone variants
+  const unlockedVariants = getUnlockedTwoToneVariants(persistentState);
+  if (unlockedVariants.length === 0) {
+    // This shouldn't happen since we start with C-G:two-note:4-4 unlocked
+    throw new Error("No unlocked two-tone variants");
+  }
+
   // Select target note (with stickiness - stays until 3 correct in a row)
   const [
     targetNote,
-    , // octave from selectTargetNote is ignored - we calculate our own
-    isNewTarget,
+    , // octave from selectTargetNote is ignored - we use variants
+    , // isNewTarget is computed in initTwoNoteQuestionFromVariant
     isFirstOnTarget,
     updatedState,
   ] = selectTargetNote(persistentState, pickRandomOctave);
   persistentState = updatedState;
 
-  // Select other note from vocabulary (vocab-only pairs)
-  const vocab = persistentState.learningVocabulary.filter(n => n !== targetNote);
-  const otherNote = vocab[Math.floor(Math.random() * vocab.length)];
+  // Find variants that include the target note
+  const matchingVariants = unlockedVariants.filter((v) => {
+    const { pair } = parseVariantKey(v);
+    const [a, b] = pair.split("-") as [FullTone, FullTone];
+    return a === targetNote || b === targetNote;
+  });
 
-  // 50/50 decide which note should be higher in pitch
-  const targetIsHigher = Math.random() < 0.5;
-  const [higherNote, lowerNote] = targetIsHigher
-    ? [targetNote, otherNote]
-    : [otherNote, targetNote];
-
-  // Get valid octave pairs and select one
-  const octavePairs = selectOctavesForPair(higherNote, lowerNote);
-  let targetOctave: number;
-  let otherOctave: number;
-
-  if (!octavePairs) {
-    // Fallback: use same octave if no valid pairs (shouldn't happen)
-    targetOctave = pickRandomOctave();
-    otherOctave = targetOctave;
-  } else {
-    const [higherOctave, lowerOctave] = octavePairs;
-    targetOctave = targetIsHigher ? higherOctave : lowerOctave;
-    otherOctave = targetIsHigher ? lowerOctave : higherOctave;
+  if (matchingVariants.length === 0) {
+    // Target note has no unlocked variants yet - pick any unlocked variant
+    // This can happen if a note was just added but variants not unlocked
+    const randomVariant =
+      unlockedVariants[Math.floor(Math.random() * unlockedVariants.length)];
+    const { pair } = parseVariantKey(randomVariant);
+    const [a, b] = pair.split("-") as [FullTone, FullTone];
+    // Pick one as target randomly
+    const [newTarget, other] = Math.random() < 0.5 ? [a, b] : [b, a];
+    return initTwoNoteQuestionFromVariant(newTarget, other, randomVariant, true);
   }
 
-  const targetWithOctave = `${targetNote}${targetOctave}`;
-  const otherWithOctave = `${otherNote}${otherOctave}`;
+  // Pick a random matching variant
+  const selectedVariant =
+    matchingVariants[Math.floor(Math.random() * matchingVariants.length)];
+  const { pair } = parseVariantKey(selectedVariant);
+  const [pairNote1, pairNote2] = pair.split("-") as [FullTone, FullTone];
 
-  // Randomize which plays first
-  const [first, second] = randomizeOrder(
-    { note: targetWithOctave, family: targetNote },
-    { note: otherWithOctave, family: otherNote }
-  );
+  // The other note is the one that's not the target
+  const otherNote = pairNote1 === targetNote ? pairNote2 : pairNote1;
 
-  // Update current target octave in state
-  persistentState = {
-    ...persistentState,
-    currentTargetOctave: targetOctave,
-  };
-
-  question = {
-    questionType: "two-note",
-    note1: first.note,
-    note2: second.note,
-    family1: first.family,
-    family2: second.family,
+  return initTwoNoteQuestionFromVariant(
     targetNote,
     otherNote,
-    hasAnswered: false,
-    wasCorrect: null,
-    isFirstInStreak: isFirstOnTarget,
-    countsForStreak: true, // New questions count
-    startTime: Date.now(),
-    displayOrder: [targetNote, otherNote], // Not used for two-note questions
-  };
-
-  return { isNewTarget, introducedNote: null };
+    selectedVariant,
+    isFirstOnTarget
+  );
 }
 
 async function playQuestionNotes(): Promise<void> {
@@ -776,6 +785,7 @@ function handleChoice(chosenIndex: number): void {
     correct: isCorrect,
     wasFirstInStreak: question.isFirstInStreak,
     timeMs: Date.now() - question.startTime,
+    variantKey: question.variantKey,
   });
 
   // Check if a note was just introduced
@@ -897,6 +907,7 @@ function retryQuestion(): void {
       countsForStreak: false, // Retries/repeats don't count for streak
       startTime: Date.now(),
       displayOrder: [question.targetNote, question.otherNote], // Not used for two-note
+      variantKey: question.variantKey, // Preserve variant key
     };
   }
 
