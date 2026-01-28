@@ -415,17 +415,17 @@ kbd {
 }
 
 .intro-container.exercise-container {
-  gap: var(--space-lg);
+  gap: var(--space-md);
 }
 
 .intro-container .intro-section {
-  margin-bottom: var(--space-lg);
+  margin-bottom: var(--space-md);
 }
 
 .intro-container .intro-section h2 {
   font-size: 1.25rem;
-  margin-bottom: var(--space-md);
-  padding-bottom: var(--space-sm);
+  margin-bottom: var(--space-sm);
+  padding-bottom: var(--space-xs);
   border-bottom: 2px solid var(--accent-light);
 }
 
@@ -435,7 +435,7 @@ kbd {
 }
 
 .intro-steps {
-  margin: var(--space-md) 0;
+  margin: var(--space-sm) 0 0 0;
   padding-left: var(--space-lg);
   list-style: none;
   counter-reset: steps;
@@ -443,12 +443,16 @@ kbd {
 
 .intro-steps li {
   position: relative;
-  margin-bottom: var(--space-md);
+  margin-bottom: var(--space-sm);
   padding-left: var(--space-sm);
   font-size: 0.9375rem;
-  line-height: 1.6;
+  line-height: 1.5;
   color: var(--text-secondary);
   counter-increment: steps;
+}
+
+.intro-steps li:last-child {
+  margin-bottom: 0;
 }
 
 .intro-steps li::before {
