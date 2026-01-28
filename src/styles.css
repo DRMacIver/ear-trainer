@@ -520,7 +520,8 @@ kbd {
   color: var(--accent-primary);
 }
 
-.intro-container .controls {
+.intro-container .controls,
+.intro-controls {
   justify-content: center;
 }
 

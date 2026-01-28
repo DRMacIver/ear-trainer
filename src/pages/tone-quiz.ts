@@ -364,7 +364,7 @@ function renderIntroduction(): void {
         <div class="intro-buttons" id="vocab-buttons"></div>
       </div>
 
-      <div class="controls">
+      <div class="controls intro-controls">
         <button class="play-again-btn" id="replay-intro-btn">Replay All</button>
         <button class="check-button" id="continue-btn">Continue to Quiz</button>
       </div>
