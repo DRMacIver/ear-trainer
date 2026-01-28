@@ -2,20 +2,21 @@
  * Shared difficulty adjustment algorithm using exponential moving average (EMA).
  *
  * Tracks an EMA of success rate, initialized to 0.85.
- * After each answer: ema = 0.05 * (1 if correct else 0) + 0.95 * ema
+ * After each answer: ema = 0.10 * (1 if correct else 0) + 0.90 * ema
  *
- * If EMA > 0.92: increase difficulty, reset EMA to 0.85
+ * If EMA > 0.88: increase difficulty, reset EMA to 0.85
  * If EMA < 0.70: decrease difficulty (min 1), reset EMA to 0.85
  *
  * The reset provides a grace period at each level. The asymmetric thresholds
- * favor stability at harder levels. The 0.05 smoothing factor means roughly
- * 4 consecutive errors trigger demotion and ~12 consecutive correct answers
- * trigger promotion, but mixed performance keeps difficulty stable.
+ * favor stability at harder levels. The 0.10 smoothing factor means roughly
+ * 2 consecutive errors trigger demotion and ~6 consecutive correct answers
+ * trigger promotion, making progression more responsive to sustained good
+ * performance.
  */
 
 const INITIAL_EMA = 0.85;
-const SMOOTHING_FACTOR = 0.05;
-const PROMOTION_THRESHOLD = 0.92;
+const SMOOTHING_FACTOR = 0.1;
+const PROMOTION_THRESHOLD = 0.88;
 const DEMOTION_THRESHOLD = 0.7;
 
 export interface DifficultyState {
