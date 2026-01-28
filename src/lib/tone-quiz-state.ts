@@ -5,7 +5,7 @@
 
 import { Card, Grade, createDeck } from "./fsrs.js";
 
-const STORAGE_KEY = "tone-quiz-state";
+const STORAGE_KEY = "tone-quiz-state-v2";
 const deck = createDeck();
 
 export { Grade };
@@ -31,19 +31,23 @@ export const AVAILABLE_OCTAVES = [3, 4, 5] as const;
 /** Order to introduce notes: C and G first (well separated), then fill in */
 export const LEARNING_ORDER: FullTone[] = ["C", "G", "E", "A", "D", "F", "B"];
 
-/** Number of recent attempts to consider for familiarity */
-const FAMILIARITY_WINDOW = 4;
-/** Minimum correct in window to be considered familiar with a pairing */
-const FAMILIARITY_THRESHOLD = 3;
 /** Number of consecutive correct answers needed to move to next target */
 export const STREAK_LENGTH = 3;
 
-/** Consecutive correct needed against each closest note to introduce candidate */
-const CANDIDATE_STREAK_THRESHOLD = 5;
-/** Maximum questions without introduction before forcing it */
-const MAX_QUESTIONS_WITHOUT_INTRODUCTION = 30;
+/** Number of recent attempts to consider for mastery */
+export const MASTERY_WINDOW = 10;
+/** Minimum correct in window to be considered mastered */
+export const MASTERY_THRESHOLD = 9;
+/** Minimum questions between any unlocks */
+export const UNLOCK_COOLDOWN = 20;
 
 export type QuestionType = "two-note" | "single-note";
+
+/** Pending unlock types */
+export interface PendingUnlock {
+  type: "single-note-pair" | "note";
+  value: string; // Normalized pair "C-G" or note "E"
+}
 
 export interface QuestionRecord {
   timestamp: number;
@@ -88,9 +92,10 @@ export interface ToneQuizState {
   correctStreak: number; // Consecutive correct answers on current target
   isFirstOnTarget: boolean; // Whether next question is first on this target
 
-  // Candidate introduction tracking
-  candidateStreaks: Record<string, number>; // "target-candidate" -> consecutive correct
-  questionsSinceLastIntroduction: number;
+  // Unlock-based progression system
+  unlockedSingleNotePairs: string[]; // Normalized pairs that have unlocked single-note questions ["C-G", ...]
+  pendingUnlocks: PendingUnlock[]; // Queue of unlocks waiting for cooldown
+  questionsSinceLastUnlock: number; // Counter for unlock cooldown
 
   // FSRS spaced repetition state
   pairCards: Record<string, TonePairCard>; // "target-other" -> card state
@@ -108,8 +113,9 @@ function createInitialState(): ToneQuizState {
     currentTargetOctave: null,
     correctStreak: 0,
     isFirstOnTarget: true,
-    candidateStreaks: {},
-    questionsSinceLastIntroduction: 0,
+    unlockedSingleNotePairs: [],
+    pendingUnlocks: [],
+    questionsSinceLastUnlock: 0,
     pairCards: {},
     session: {
       sessionStartTime: Date.now(),
@@ -123,20 +129,8 @@ export function loadState(): ToneQuizState {
   if (!stored) {
     return createInitialState();
   }
-  const parsed = JSON.parse(stored) as Partial<ToneQuizState>;
-  // Merge with defaults for backwards compatibility
-  const initial = createInitialState();
-  return {
-    ...initial,
-    ...parsed,
-    // Ensure new fields have defaults (migration from older state)
-    singleNotePerformance: parsed.singleNotePerformance ?? {},
-    pairCards: parsed.pairCards ?? {},
-    session: parsed.session ?? {
-      sessionStartTime: Date.now(),
-      previousSessionEnd: parsed.lastPlayedAt ?? null,
-    },
-  };
+  const parsed = JSON.parse(stored) as ToneQuizState;
+  return parsed;
 }
 
 export function saveState(state: ToneQuizState): void {
@@ -207,6 +201,48 @@ export function getNoteDistance(a: FullTone, b: FullTone): number {
   return Math.min(diff, FULL_TONES.length - diff);
 }
 
+// ============================================================================
+// Pair Utility Functions for New Unlock System
+// ============================================================================
+
+/**
+ * Normalize a pair to alphabetical order for consistent storage.
+ * Returns "C-G" regardless of whether called with (C, G) or (G, C).
+ */
+export function normalizePair(a: FullTone, b: FullTone): string {
+  return a < b ? `${a}-${b}` : `${b}-${a}`;
+}
+
+/**
+ * Get C Major scale position for a note (C=0, D=1, E=2, F=3, G=4, A=5, B=6).
+ */
+export function getScalePosition(note: FullTone): number {
+  return FULL_TONES.indexOf(note);
+}
+
+/**
+ * Get notes between two notes in C Major scale (exclusive).
+ * Returns notes in LEARNING_ORDER preference.
+ * Example: getNotesBetween("C", "G") returns ["D", "E", "F"]
+ */
+export function getNotesBetween(a: FullTone, b: FullTone): FullTone[] {
+  const posA = getScalePosition(a);
+  const posB = getScalePosition(b);
+  const minPos = Math.min(posA, posB);
+  const maxPos = Math.max(posA, posB);
+
+  // Get notes strictly between (exclusive of endpoints)
+  const between: FullTone[] = [];
+  for (let i = minPos + 1; i < maxPos; i++) {
+    between.push(FULL_TONES[i]);
+  }
+
+  // Sort by LEARNING_ORDER preference
+  return between.sort(
+    (x, y) => LEARNING_ORDER.indexOf(x) - LEARNING_ORDER.indexOf(y)
+  );
+}
+
 /**
  * Get the two closest notes to a candidate from the vocabulary.
  * Returns sorted by distance (closest first).
@@ -224,22 +260,216 @@ export function getClosestVocabularyNotes(
   return withDistances.slice(0, 2).map((x) => x.note);
 }
 
-/**
- * Check if the candidate is ready to be introduced based on streak performance.
- * Requires CANDIDATE_STREAK_THRESHOLD consecutive correct against each of the
- * two closest vocabulary notes.
- */
-export function isCandidateReadyByStreak(
-  state: ToneQuizState,
-  candidate: FullTone
-): boolean {
-  const closest = getClosestVocabularyNotes(state.learningVocabulary, candidate);
-  if (closest.length < 2) return false; // Need at least 2 vocabulary notes
+// ============================================================================
+// Performance Tracking Functions for Mastery
+// ============================================================================
 
-  return closest.every((target) => {
-    const key = `${target}-${candidate}`;
-    return (state.candidateStreaks[key] ?? 0) >= CANDIDATE_STREAK_THRESHOLD;
+/**
+ * Get combined two-tone performance for a pair (both directions, last MASTERY_WINDOW).
+ * Combines results from A->B and B->A questions.
+ */
+export function getPairTwoToneResults(
+  state: ToneQuizState,
+  a: FullTone,
+  b: FullTone
+): boolean[] {
+  const resultsAB = state.performance[a]?.[b] ?? [];
+  const resultsBA = state.performance[b]?.[a] ?? [];
+
+  // Combine and take last MASTERY_WINDOW results
+  // We interleave by timestamp order if we had timestamps, but we don't
+  // So just combine and take the most recent overall
+  const combined = [...resultsAB, ...resultsBA];
+  return combined.slice(-MASTERY_WINDOW);
+}
+
+/**
+ * Get combined single-note performance for a pair (both directions, last MASTERY_WINDOW).
+ * Combines results from "played A, choice A vs B" and "played B, choice B vs A".
+ */
+export function getPairSingleNoteResults(
+  state: ToneQuizState,
+  a: FullTone,
+  b: FullTone
+): boolean[] {
+  const resultsAB = state.singleNotePerformance[a]?.[b] ?? [];
+  const resultsBA = state.singleNotePerformance[b]?.[a] ?? [];
+
+  const combined = [...resultsAB, ...resultsBA];
+  return combined.slice(-MASTERY_WINDOW);
+}
+
+/**
+ * Check if results meet mastery threshold (9/10).
+ */
+export function isMastered(results: boolean[]): boolean {
+  if (results.length < MASTERY_WINDOW) return false;
+  const correct = results.filter(Boolean).length;
+  return correct >= MASTERY_THRESHOLD;
+}
+
+// ============================================================================
+// Unlock Logic Functions
+// ============================================================================
+
+/**
+ * Check if single-note questions are unlocked for this pair.
+ */
+export function isSingleNotePairUnlocked(
+  state: ToneQuizState,
+  a: FullTone,
+  b: FullTone
+): boolean {
+  const normalized = normalizePair(a, b);
+  return state.unlockedSingleNotePairs.includes(normalized);
+}
+
+/**
+ * Get all unlocked single-note pairs as [FullTone, FullTone][].
+ */
+export function getUnlockedSingleNotePairs(
+  state: ToneQuizState
+): Array<[FullTone, FullTone]> {
+  return state.unlockedSingleNotePairs.map((pair) => {
+    const [a, b] = pair.split("-") as [FullTone, FullTone];
+    return [a, b];
   });
+}
+
+/**
+ * Find next note to unlock between a pair (or null if any already between or none exist).
+ * Returns the first note in LEARNING_ORDER that:
+ * 1. Is between the two notes in the C Major scale
+ * 2. Is not already in the vocabulary
+ */
+export function getNextNoteToBetween(
+  state: ToneQuizState,
+  a: FullTone,
+  b: FullTone
+): FullTone | null {
+  const between = getNotesBetween(a, b);
+
+  // Check if any notes between are already in vocabulary
+  const vocabSet = new Set(state.learningVocabulary);
+  const betweenInVocab = between.filter((n) => vocabSet.has(n));
+  if (betweenInVocab.length > 0) {
+    return null; // Already have a note between, don't add another
+  }
+
+  // Find the first note between that's not in vocabulary (sorted by LEARNING_ORDER)
+  for (const note of between) {
+    if (!vocabSet.has(note)) {
+      return note;
+    }
+  }
+
+  return null; // No notes between or all already in vocabulary
+}
+
+/**
+ * Queue an unlock (doesn't apply immediately).
+ */
+export function queueUnlock(
+  state: ToneQuizState,
+  unlock: PendingUnlock
+): ToneQuizState {
+  // Check if already queued
+  const alreadyQueued = state.pendingUnlocks.some(
+    (u) => u.type === unlock.type && u.value === unlock.value
+  );
+  if (alreadyQueued) return state;
+
+  // Check if already unlocked/in vocab
+  if (unlock.type === "single-note-pair") {
+    if (state.unlockedSingleNotePairs.includes(unlock.value)) return state;
+  } else {
+    if (state.learningVocabulary.includes(unlock.value as FullTone)) return state;
+  }
+
+  return {
+    ...state,
+    pendingUnlocks: [...state.pendingUnlocks, unlock],
+  };
+}
+
+/**
+ * Process pending unlocks if cooldown allows.
+ * Returns updated state with unlock applied (if any).
+ */
+export function processPendingUnlocks(state: ToneQuizState): ToneQuizState {
+  if (state.pendingUnlocks.length === 0) return state;
+  if (state.questionsSinceLastUnlock < UNLOCK_COOLDOWN) return state;
+
+  // Pop first item from queue
+  const [unlock, ...remaining] = state.pendingUnlocks;
+
+  let newState: ToneQuizState = {
+    ...state,
+    pendingUnlocks: remaining,
+    questionsSinceLastUnlock: 0,
+  };
+
+  if (unlock.type === "single-note-pair") {
+    // Silent unlock - just add to unlocked pairs
+    newState = {
+      ...newState,
+      unlockedSingleNotePairs: [...newState.unlockedSingleNotePairs, unlock.value],
+    };
+  } else {
+    // Note unlock - add to vocabulary (triggers introduction screen in UI)
+    newState = {
+      ...newState,
+      learningVocabulary: [...newState.learningVocabulary, unlock.value as FullTone],
+    };
+  }
+
+  return newState;
+}
+
+/**
+ * Check all pairs for newly earned unlocks and queue them.
+ * Called after recording each question.
+ */
+export function checkAndQueueUnlocks(state: ToneQuizState): ToneQuizState {
+  let newState = state;
+  const vocab = state.learningVocabulary;
+
+  // Check each pair in vocabulary
+  for (let i = 0; i < vocab.length; i++) {
+    for (let j = i + 1; j < vocab.length; j++) {
+      const a = vocab[i];
+      const b = vocab[j];
+      const normalized = normalizePair(a, b);
+
+      if (!isSingleNotePairUnlocked(newState, a, b)) {
+        // Check if two-tone mastery achieved
+        const twoToneResults = getPairTwoToneResults(newState, a, b);
+        if (isMastered(twoToneResults)) {
+          newState = queueUnlock(newState, {
+            type: "single-note-pair",
+            value: normalized,
+          });
+        }
+      } else {
+        // Single-note is unlocked, check for single-note mastery
+        const singleNoteResults = getPairSingleNoteResults(newState, a, b);
+        if (isMastered(singleNoteResults)) {
+          const nextNote = getNextNoteToBetween(newState, a, b);
+          if (nextNote) {
+            newState = queueUnlock(newState, {
+              type: "note",
+              value: nextNote,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // Process pending unlocks if cooldown allows
+  newState = processPendingUnlocks(newState);
+
+  return newState;
 }
 
 /**
@@ -287,100 +517,6 @@ export function selectLeastPracticedNote(state: ToneQuizState): FullTone {
 }
 
 /**
- * Check if the user is familiar with distinguishing target from other.
- */
-export function isFamiliarWith(
-  state: ToneQuizState,
-  target: FullTone,
-  other: FullTone
-): boolean {
-  const results = state.performance[target]?.[other] ?? [];
-  if (results.length < FAMILIARITY_WINDOW) return false;
-  const recent = results.slice(-FAMILIARITY_WINDOW);
-  const correct = recent.filter(Boolean).length;
-  return correct >= FAMILIARITY_THRESHOLD;
-}
-
-/**
- * Check if a note is fully familiar (can distinguish from both adjacent notes).
- */
-export function isNoteFamiliar(state: ToneQuizState, note: FullTone): boolean {
-  const [lower, upper] = getAdjacentNotes(note);
-  return isFamiliarWith(state, note, lower) && isFamiliarWith(state, note, upper);
-}
-
-/**
- * Check if a note is ready for single-note questions.
- * A note is ready when the user can distinguish it from both adjacent notes.
- */
-export function isReadyForSingleNote(state: ToneQuizState, note: FullTone): boolean {
-  return isNoteFamiliar(state, note);
-}
-
-/**
- * Check if a pair of notes is ready for single-note questions.
- * A pair is ready when the user can distinguish between them in two-note mode.
- */
-export function isPairReadyForSingleNote(
-  state: ToneQuizState,
-  noteA: FullTone,
-  noteB: FullTone
-): boolean {
-  // Can ask "Is this A or B?" when user is familiar with A vs B in both directions
-  return isFamiliarWith(state, noteA, noteB) && isFamiliarWith(state, noteB, noteA);
-}
-
-/**
- * Check if user is familiar with identifying a note in single-note questions.
- * Tracks: "when `played` was played, and choice was `played` vs `alternative`, was it correct?"
- */
-export function isSingleNoteFamiliarWith(
-  state: ToneQuizState,
-  played: FullTone,
-  alternative: FullTone
-): boolean {
-  const results = state.singleNotePerformance[played]?.[alternative] ?? [];
-  if (results.length < FAMILIARITY_WINDOW) return false;
-  const recent = results.slice(-FAMILIARITY_WINDOW);
-  const correct = recent.filter(Boolean).length;
-  return correct >= FAMILIARITY_THRESHOLD;
-}
-
-/**
- * Check if a pair is familiar for single-note questions in both directions.
- */
-export function isSingleNotePairFamiliar(
-  state: ToneQuizState,
-  noteA: FullTone,
-  noteB: FullTone
-): boolean {
-  return (
-    isSingleNoteFamiliarWith(state, noteA, noteB) &&
-    isSingleNoteFamiliarWith(state, noteB, noteA)
-  );
-}
-
-/**
- * Get all pairs in vocabulary that are ready for single-note questions.
- */
-export function getReadySingleNotePairs(
-  state: ToneQuizState
-): Array<[FullTone, FullTone]> {
-  const pairs: Array<[FullTone, FullTone]> = [];
-  const vocab = state.learningVocabulary;
-
-  for (let i = 0; i < vocab.length; i++) {
-    for (let j = i + 1; j < vocab.length; j++) {
-      if (isPairReadyForSingleNote(state, vocab[i], vocab[j])) {
-        pairs.push([vocab[i], vocab[j]]);
-      }
-    }
-  }
-
-  return pairs;
-}
-
-/**
  * Get all adjacent pairs in vocabulary (notes that are neighbors in the learning set).
  */
 export function getAdjacentVocabPairs(
@@ -409,90 +545,6 @@ export function getAdjacentVocabPairs(
   }
 
   return pairs;
-}
-
-/**
- * Check if all vocabulary notes are single-note-familiar with their vocab neighbors.
- * Used to gate introduction of new notes.
- * Each note must be distinguishable from the notes on either side of it
- * within the learning set (not chromatic neighbors).
- */
-export function areAllVocabSingleNotesFamiliar(state: ToneQuizState): boolean {
-  const vocab = state.learningVocabulary;
-
-  // Need at least 2 notes to have neighbors
-  if (vocab.length < 2) {
-    return true;
-  }
-
-  // Check that each note is single-note-familiar with its vocab neighbors
-  for (const note of vocab) {
-    const [lower, upper] = getAdjacentNotesInVocabulary(note, vocab);
-
-    // Must be familiar with lower neighbor (bidirectionally)
-    if (lower && !isSingleNotePairFamiliar(state, note, lower)) {
-      return false;
-    }
-
-    // Must be familiar with upper neighbor (bidirectionally)
-    // Note: for 2-note vocab, upper === lower, so this is redundant but harmless
-    if (upper && upper !== lower && !isSingleNotePairFamiliar(state, note, upper)) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-/**
- * Select a pair for single-note question.
- * Prioritizes:
- * 1. Adjacent pairs (neighbors in learning set) that aren't familiar
- * 2. Other unfamiliar pairs
- * 3. Any ready pair
- * Returns null if no pairs are ready for single-note questions.
- */
-export function selectSingleNotePair(
-  state: ToneQuizState
-): { noteA: FullTone; noteB: FullTone } | null {
-  const readyPairs = getReadySingleNotePairs(state);
-
-  if (readyPairs.length === 0) return null;
-
-  const vocab = state.learningVocabulary;
-  const adjacentPairs = getAdjacentVocabPairs(vocab);
-
-  // Filter to adjacent pairs that are also ready
-  const readyAdjacentPairs = adjacentPairs.filter(([a, b]) =>
-    readyPairs.some(
-      ([ra, rb]) => (ra === a && rb === b) || (ra === b && rb === a)
-    )
-  );
-
-  // Priority 1: Unfamiliar adjacent pairs
-  const unfamiliarAdjacent = readyAdjacentPairs.filter(
-    ([a, b]) => !isSingleNotePairFamiliar(state, a, b)
-  );
-  if (unfamiliarAdjacent.length > 0) {
-    const [noteA, noteB] =
-      unfamiliarAdjacent[Math.floor(Math.random() * unfamiliarAdjacent.length)];
-    return { noteA, noteB };
-  }
-
-  // Priority 2: Any unfamiliar pairs
-  const unfamiliarPairs = readyPairs.filter(
-    ([a, b]) => !isSingleNotePairFamiliar(state, a, b)
-  );
-  if (unfamiliarPairs.length > 0) {
-    const [noteA, noteB] =
-      unfamiliarPairs[Math.floor(Math.random() * unfamiliarPairs.length)];
-    return { noteA, noteB };
-  }
-
-  // Priority 3: Any ready pair
-  const [noteA, noteB] =
-    readyPairs[Math.floor(Math.random() * readyPairs.length)];
-  return { noteA, noteB };
 }
 
 /**
@@ -650,8 +702,7 @@ export function recordQuestion(
     ...state,
     history: [...state.history, record],
     lastPlayedAt: record.timestamp,
-    questionsSinceLastIntroduction: state.questionsSinceLastIntroduction + 1,
-    candidateStreaks: { ...state.candidateStreaks },
+    questionsSinceLastUnlock: state.questionsSinceLastUnlock + 1,
   };
 
   // Only update performance and FSRS state if this was first in streak
@@ -673,7 +724,7 @@ export function recordQuestion(
         record.correct,
       ];
     } else {
-      // Track two-note performance (existing logic)
+      // Track two-note performance
       if (!newState.performance[target]) {
         newState.performance[target] = {};
       }
@@ -684,18 +735,6 @@ export function recordQuestion(
         ...newState.performance[target][other],
         record.correct,
       ];
-
-      // Track candidate streaks when the "other" note is the next candidate
-      const candidate = getNextNoteToLearn(state);
-      if (candidate && other === candidate) {
-        const key = `${target}-${candidate}`;
-        if (record.correct) {
-          newState.candidateStreaks[key] = (newState.candidateStreaks[key] ?? 0) + 1;
-        } else {
-          // Reset streak on wrong answer
-          newState.candidateStreaks[key] = 0;
-        }
-      }
     }
 
     // Update FSRS state for this pair (both question types)
@@ -703,7 +742,27 @@ export function recordQuestion(
     newState = recordPairReview(newState, target, other, grade);
   }
 
+  // Check for newly earned unlocks and process pending unlocks
+  newState = checkAndQueueUnlocks(newState);
+
   return newState;
+}
+
+/**
+ * Check if a note was just introduced by comparing prev and current state.
+ * This is used by the UI to show the introduction screen.
+ */
+export function getLastIntroducedNote(
+  prevState: ToneQuizState,
+  currentState: ToneQuizState
+): FullTone | null {
+  const prevVocab = new Set(prevState.learningVocabulary);
+  for (const note of currentState.learningVocabulary) {
+    if (!prevVocab.has(note)) {
+      return note;
+    }
+  }
+  return null;
 }
 
 /**
@@ -711,6 +770,10 @@ export function recordQuestion(
  * Stays on same target until user gets STREAK_LENGTH correct in a row.
  * Returns [target, octave, isNewTarget, isFirstOnTarget, updatedState, introducedNote]
  * where introducedNote is the newly added vocabulary note (or null).
+ *
+ * Note: With the new unlock system, note introductions happen through the
+ * pendingUnlocks queue in recordQuestion. The introducedNote return value
+ * is now always null - use getLastIntroducedNote() to detect introductions.
  */
 export function selectTargetNote(
   state: ToneQuizState,
@@ -734,38 +797,8 @@ export function selectTargetNote(
   }
 
   // Got 3 correct in a row (or first time) - pick a new target
-  // Check if we should add a new note to vocabulary
-  let newVocabulary = state.learningVocabulary;
-  let introducedNote: FullTone | null = null;
-  const nextNote = getNextNoteToLearn(state);
-
-  if (nextNote) {
-    // Introduce new note if:
-    // 1. Candidate has 5 consecutive correct against each of its two closest vocabulary notes
-    // 2. OR 30 questions have passed without a new introduction
-    // AND user is reliable on single-note questions for all current vocab pairs
-    const readyByStreak = isCandidateReadyByStreak(state, nextNote);
-    const readyByTime =
-      state.questionsSinceLastIntroduction >= MAX_QUESTIONS_WITHOUT_INTRODUCTION;
-    const singleNoteReliable = areAllVocabSingleNotesFamiliar(state);
-
-    if ((readyByStreak || readyByTime) && singleNoteReliable) {
-      newVocabulary = [...state.learningVocabulary, nextNote];
-      introducedNote = nextNote;
-    }
-  }
-
-  // Pick a new target from vocabulary
-  // If we just introduced a note, that should be the target
-  // Otherwise, pick the least practiced note
-  let newTarget: FullTone;
-  if (introducedNote) {
-    newTarget = introducedNote;
-  } else {
-    // Use a temporary state with updated vocabulary for counting
-    const tempState = { ...state, learningVocabulary: newVocabulary };
-    newTarget = selectLeastPracticedNote(tempState);
-  }
+  // Pick the least practiced note from vocabulary
+  const newTarget = selectLeastPracticedNote(state);
   const newOctave = pickOctave(newTarget);
 
   // Only count as "new target" if it actually changed
@@ -778,18 +811,12 @@ export function selectTargetNote(
     true, // First question on new target (for familiarity tracking)
     {
       ...state,
-      learningVocabulary: newVocabulary,
       currentTarget: newTarget,
       currentTargetOctave: newOctave,
       correctStreak: 0,
       isFirstOnTarget: false,
-      // Reset candidate tracking when a new note is introduced
-      candidateStreaks: introducedNote ? {} : state.candidateStreaks,
-      questionsSinceLastIntroduction: introducedNote
-        ? 0
-        : state.questionsSinceLastIntroduction,
     },
-    introducedNote,
+    null, // Note introductions now happen via unlock system
   ];
 }
 

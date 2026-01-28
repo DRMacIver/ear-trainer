@@ -19,7 +19,8 @@ import {
   maybeStartNewSession,
   getRepeatProbability,
   selectMostUrgentPair,
-  getReadySingleNotePairs,
+  getUnlockedSingleNotePairs,
+  getLastIntroducedNote,
   ToneQuizState,
   FullTone,
   FULL_TONES,
@@ -85,7 +86,7 @@ function shuffleArray<T>(array: T[]): void {
 
 /** Start a single-note cycle by populating the queue with all notes from ready pairs */
 function startSingleNoteCycle(): void {
-  const readyPairs = getReadySingleNotePairs(persistentState);
+  const readyPairs = getUnlockedSingleNotePairs(persistentState);
   if (readyPairs.length === 0) return;
 
   // Get all unique notes from ready pairs
@@ -118,7 +119,7 @@ function initQuestion(): InitQuestionResult {
   }
 
   // Check if we should start a new single-note cycle
-  const readyPairs = getReadySingleNotePairs(persistentState);
+  const readyPairs = getUnlockedSingleNotePairs(persistentState);
   if (readyPairs.length > 0 && Math.random() < SINGLE_NOTE_CYCLE_CHANCE) {
     startSingleNoteCycle();
     return initSingleNoteQuestion();
@@ -155,7 +156,7 @@ function initSingleNoteQuestion(): {
   }
 
   // Find a ready pair that includes this note
-  const readyPairs = getReadySingleNotePairs(persistentState);
+  const readyPairs = getUnlockedSingleNotePairs(persistentState);
   const matchingPairs = readyPairs.filter(
     ([a, b]) => a === noteToPlay || b === noteToPlay
   );
@@ -290,7 +291,6 @@ function initQuestionNormal(): {
     isNewTarget,
     isFirstOnTarget,
     updatedState,
-    introducedNote,
   ] = selectTargetNote(persistentState, pickRandomOctave);
   persistentState = updatedState;
 
@@ -350,7 +350,7 @@ function initQuestionNormal(): {
     displayOrder: [targetNote, otherNote], // Not used for two-note questions
   };
 
-  return { isNewTarget, introducedNote };
+  return { isNewTarget, introducedNote: null };
 }
 
 async function playQuestionNotes(): Promise<void> {
@@ -714,6 +714,9 @@ function advanceToNext(): void {
   }
 }
 
+// Track pending introduction (set by recordQuestion when a note is unlocked)
+let pendingIntroducedNote: FullTone | null = null;
+
 function handleChoice(chosenIndex: number): void {
   if (question.hasAnswered) {
     advanceToNext();
@@ -748,6 +751,9 @@ function handleChoice(chosenIndex: number): void {
     shouldRetry = Math.random() < RETRY_CHANCE;
   }
 
+  // Save previous state to detect note introductions
+  const prevState = persistentState;
+
   // Record to persistent state (map to noteA/noteB for QuestionRecord)
   persistentState = recordQuestion(persistentState, {
     timestamp: Date.now(),
@@ -760,6 +766,9 @@ function handleChoice(chosenIndex: number): void {
     wasFirstInStreak: question.isFirstInStreak,
     timeMs: Date.now() - question.startTime,
   });
+
+  // Check if a note was just introduced
+  pendingIntroducedNote = getLastIntroducedNote(prevState, persistentState);
 
   // Only update streak if this question counts and won't be repeated (two-note only)
   if (question.countsForStreak && !shouldRepeatSwapped && !isSingleNote) {
@@ -878,13 +887,16 @@ function retryQuestion(): void {
 
 function nextQuestion(): void {
   clearAutoAdvance();
-  const { isNewTarget, introducedNote } = initQuestion();
 
-  // If a new note was introduced, start introduction mode
-  if (introducedNote) {
-    startIntroduction(introducedNote);
+  // Check if a note was just introduced via the unlock system
+  if (pendingIntroducedNote) {
+    const noteToIntroduce = pendingIntroducedNote;
+    pendingIntroducedNote = null;
+    startIntroduction(noteToIntroduce);
     return;
   }
+
+  const { isNewTarget } = initQuestion();
 
   render();
   if (isNewTarget) {
@@ -955,14 +967,8 @@ export function renderToneQuizAbout(): void {
 
 export function renderToneQuiz(): void {
   persistentState = loadState();
-  const { introducedNote } = initQuestion();
-
-  // If a new note was introduced on first load (shouldn't happen normally),
-  // start introduction mode
-  if (introducedNote) {
-    startIntroduction(introducedNote);
-    return;
-  }
+  pendingIntroducedNote = null; // Reset on page load
+  initQuestion();
 
   render();
   playQuestionNotes();
