@@ -286,6 +286,32 @@ a:hover {
   opacity: 0.85;
 }
 
+.feedback-tappable {
+  cursor: pointer;
+}
+
+.feedback.success.feedback-tappable:hover {
+  opacity: 0.9;
+}
+
+.continue-hint {
+  font-weight: 400;
+  opacity: 0.85;
+}
+
+span.continue-hint.feedback-tappable {
+  display: inline-block;
+  margin-top: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+span.continue-hint.feedback-tappable:hover {
+  background: rgba(0, 0, 0, 0.1);
+}
+
 /* Stats display */
 .stats {
   display: inline-flex;
@@ -729,5 +755,50 @@ kbd {
     display: inline-flex;
     margin-right: var(--space-sm);
     margin-bottom: -0.25rem;
+  }
+}
+
+/* Touch device optimizations */
+@media (pointer: coarse) {
+  /* Larger touch targets for buttons */
+  .note-choice-btn {
+    min-height: 64px;
+    padding: var(--space-lg) var(--space-xl);
+  }
+
+  .play-again-btn {
+    min-height: 44px;
+    padding: var(--space-md) var(--space-lg);
+  }
+
+  .check-button,
+  .start-button {
+    min-height: 48px;
+  }
+
+  .intro-note-btn {
+    min-height: 48px;
+    padding: var(--space-md) var(--space-xl);
+  }
+
+  /* Better spacing for touch */
+  .note-choice-buttons {
+    gap: var(--space-lg);
+  }
+
+  .feedback {
+    padding: var(--space-lg);
+  }
+
+  /* Larger tap target for continue hint */
+  span.continue-hint.feedback-tappable {
+    padding: var(--space-md) var(--space-lg);
+    font-size: 1rem;
+  }
+
+  /* Danger zone button easier to tap */
+  .danger-btn {
+    padding: var(--space-md) var(--space-lg);
+    min-height: 44px;
   }
 }

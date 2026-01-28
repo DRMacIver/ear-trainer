@@ -32,6 +32,15 @@ const GAP_BETWEEN_NOTES = 300; // ms
 const INTRO_NOTE_DURATION = 0.5;
 const INTRO_NOTE_GAP = 150; // ms
 
+/** Detect if user is on a touch device (mobile/tablet) */
+function isTouchDevice(): boolean {
+  return (
+    "ontouchstart" in window ||
+    navigator.maxTouchPoints > 0 ||
+    window.matchMedia("(pointer: coarse)").matches
+  );
+}
+
 interface QuestionState {
   questionType: QuestionType;
   note1: string; // First note played (with octave), or the only note for single-note
@@ -434,6 +443,7 @@ function renderIntroduction(): void {
 
   const app = document.getElementById("app")!;
   const note = introState.introducedNote;
+  const tapOrClick = isTouchDevice() ? "Tap" : "Click";
 
   app.innerHTML = `
     <h1>Tone Quiz</h1>
@@ -441,7 +451,7 @@ function renderIntroduction(): void {
     <div class="exercise-container">
       <div class="introduction-title">
         <h2>Introducing ${note}</h2>
-        <p>Click any button to hear that note.</p>
+        <p>${tapOrClick} any button to hear that note.</p>
       </div>
 
       <div class="intro-section">
@@ -553,6 +563,7 @@ function render(): void {
   const vocabDisplay = persistentState.learningVocabulary.join(", ");
 
   const isSingleNote = question.questionType === "single-note";
+  const isTouch = isTouchDevice();
   const description = isSingleNote
     ? "A note plays. Identify which note it is."
     : "Two notes play. Identify the named note.";
@@ -566,7 +577,7 @@ function render(): void {
   app.innerHTML = `
     <h1>Tone Quiz</h1>
     <p>${description}</p>
-    <p class="keyboard-hints"><strong>Keys:</strong> ${keyHints}</p>
+    ${isTouch ? "" : `<p class="keyboard-hints"><strong>Keys:</strong> ${keyHints}</p>`}
 
     <div class="exercise-container">
       <div class="controls">
@@ -784,10 +795,13 @@ function handleChoice(chosenIndex: number): void {
 function renderFeedback(): void {
   const feedback = document.getElementById("feedback")!;
   const isSingleNote = question.questionType === "single-note";
+  const isTouch = isTouchDevice();
+  const continueHint = isTouch ? "Tap to continue" : "Press Space to continue";
 
   if (question.wasCorrect) {
-    feedback.className = "feedback success";
-    feedback.textContent = "Correct! Press Space to continue.";
+    feedback.className = "feedback success feedback-tappable";
+    feedback.innerHTML = `Correct! <span class="continue-hint">${continueHint}.</span>`;
+    feedback.onclick = advanceToNext;
     // Auto-advance after delay
     autoAdvanceTimeout = setTimeout(advanceToNext, AUTO_ADVANCE_DELAY);
   } else {
@@ -797,7 +811,7 @@ function renderFeedback(): void {
       feedback.innerHTML = `
         Incorrect. That was ${question.targetNote}, not ${question.otherNote}.
         <br><button id="replay-btn" class="play-again-btn" style="margin-top: 0.5rem;">Replay Note</button>
-        <br><small>Press Space to continue.</small>
+        <br><span class="continue-hint feedback-tappable" id="continue-hint">${continueHint}.</span>
       `;
     } else {
       const targetPosition =
@@ -805,13 +819,18 @@ function renderFeedback(): void {
       feedback.innerHTML = `
         Incorrect. The ${question.targetNote} was ${targetPosition} (the other note was ${question.otherNote}).
         <br><button id="replay-btn" class="play-again-btn" style="margin-top: 0.5rem;">Replay Both Notes</button>
-        <br><small>Press Space to continue.</small>
+        <br><span class="continue-hint feedback-tappable" id="continue-hint">${continueHint}.</span>
       `;
     }
 
     const replayBtn = document.getElementById("replay-btn");
     if (replayBtn) {
       replayBtn.addEventListener("click", playQuestionNotes);
+    }
+
+    const continueHintEl = document.getElementById("continue-hint");
+    if (continueHintEl) {
+      continueHintEl.onclick = advanceToNext;
     }
   }
 }
@@ -907,12 +926,17 @@ function nextQuestion(): void {
 
 function renderIntroPage(showBackLink: boolean): void {
   const app = document.getElementById("app")!;
+  const isTouch = isTouchDevice();
 
   const backLink = showBackLink
     ? `<a href="#/quiz" class="back-link">&larr; Back to Quiz</a>`
     : "";
 
   const buttonText = showBackLink ? "Return to Quiz" : "Start Training";
+
+  const keyboardTip = isTouch
+    ? ""
+    : `<li>Keyboard shortcuts: <kbd>1</kbd>/<kbd>←</kbd> first option, <kbd>2</kbd>/<kbd>→</kbd> second option, <kbd>R</kbd> replay</li>`;
 
   app.innerHTML = `
     ${backLink}
@@ -939,7 +963,7 @@ function renderIntroPage(showBackLink: boolean): void {
           <li>Use headphones for best results</li>
           <li>The exercise adapts to your skill level automatically</li>
           <li>Your progress is saved in your browser</li>
-          <li>Keyboard shortcuts: <kbd>1</kbd>/<kbd>←</kbd> first option, <kbd>2</kbd>/<kbd>→</kbd> second option, <kbd>R</kbd> replay</li>
+          ${keyboardTip}
         </ul>
       </div>
 
