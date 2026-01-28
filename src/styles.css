@@ -405,7 +405,7 @@ kbd {
   font-weight: 400;
   color: var(--accent-primary);
   margin-top: calc(-1 * var(--space-sm));
-  margin-bottom: var(--space-md);
+  margin-bottom: var(--space-sm);
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
