@@ -15,7 +15,10 @@ import {
   getLastIntroducedNote,
   getUnlockedTwoToneVariants,
   getUnlockedSingleNoteVariants,
+  getUnplayedTwoToneVariants,
+  getUnplayedSingleNoteVariants,
   parseVariantKey,
+  consumeForcedVariant,
   ToneQuizState,
   FullTone,
   FULL_TONES,
@@ -108,6 +111,14 @@ function showNoteChangeModal(note: FullTone, onDismiss?: () => void): void {
 
 /** Initialize a new question. Returns true if target note changed (for flash). */
 function initQuestion(): boolean {
+  // Check for a forced variant from accelerated mode
+  const [forcedVariant, updatedState] = consumeForcedVariant(persistentState);
+  if (forcedVariant) {
+    persistentState = updatedState;
+    saveState(persistentState);
+    return initQuestionFromVariant(forcedVariant);
+  }
+
   // Decide question type based on what's available and stickiness
   const twoToneVariants = getUnlockedTwoToneVariants(persistentState);
   const singleNoteVariants = getUnlockedSingleNoteVariants(persistentState);
@@ -124,7 +135,7 @@ function initQuestion(): boolean {
     // 70% chance to stay on same type
     questionType = lastQuestionType;
   } else {
-    // Randomly pick type (weighted towards two-tone since it's more common)
+    // Randomly pick type (weighted towards two-note since it's more common)
     questionType = Math.random() < 0.6 ? "two-note" : "single-note";
   }
 
@@ -138,6 +149,82 @@ function initQuestion(): boolean {
   }
 }
 
+/** Initialize a question from a specific variant (used by accelerated mode) */
+function initQuestionFromVariant(variantKey: string): boolean {
+  const { pair, questionType, octaves } = parseVariantKey(variantKey);
+  const [pairNote1, pairNote2] = pair.split("-") as [FullTone, FullTone];
+
+  lastQuestionType = questionType;
+
+  if (questionType === "single-note") {
+    const octave = octaves as number;
+    // Randomly pick which note to play
+    const [noteToPlay, alternative] =
+      Math.random() < 0.5 ? [pairNote1, pairNote2] : [pairNote2, pairNote1];
+    const playedWithOctave = `${noteToPlay}${octave}`;
+    const displayOrder = randomizeOrder(noteToPlay, alternative);
+
+    question = {
+      questionType: "single-note",
+      note1: playedWithOctave,
+      note2: "",
+      family1: noteToPlay,
+      family2: noteToPlay,
+      targetNote: noteToPlay,
+      otherNote: alternative,
+      hasAnswered: false,
+      wasCorrect: null,
+      startTime: Date.now(),
+      displayOrder,
+      variantKey,
+    };
+    return false; // No flash for single-note
+  } else {
+    const [octave1, octave2] = octaves as [number, number];
+    // Randomly pick which note is the target
+    const [targetNote, otherNote] =
+      Math.random() < 0.5 ? [pairNote1, pairNote2] : [pairNote2, pairNote1];
+
+    // Octaves match the pair order
+    const targetOctave = targetNote === pairNote1 ? octave1 : octave2;
+    const otherOctave = otherNote === pairNote1 ? octave1 : octave2;
+
+    const targetWithOctave = `${targetNote}${targetOctave}`;
+    const otherWithOctave = `${otherNote}${otherOctave}`;
+
+    // Randomize play order
+    const [first, second] = randomizeOrder(
+      { note: targetWithOctave, family: targetNote },
+      { note: otherWithOctave, family: otherNote }
+    );
+
+    // Check if target changed (for flash)
+    const isNewTarget = currentStickyNote !== null && targetNote !== currentStickyNote;
+
+    // Update stickiness
+    currentStickyNote = targetNote;
+    questionsRemainingOnNote = NOTE_STICKY_MIN +
+      Math.floor(Math.random() * (NOTE_STICKY_MAX - NOTE_STICKY_MIN + 1)) - 1;
+
+    question = {
+      questionType: "two-note",
+      note1: first.note,
+      note2: second.note,
+      family1: first.family,
+      family2: second.family,
+      targetNote,
+      otherNote,
+      hasAnswered: false,
+      wasCorrect: null,
+      startTime: Date.now(),
+      displayOrder: [first.family, second.family],
+      variantKey,
+    };
+
+    return isNewTarget;
+  }
+}
+
 /** Initialize a random single-note question from unlocked variants */
 function initSingleNoteQuestion(): void {
   const unlockedVariants = getUnlockedSingleNoteVariants(persistentState);
@@ -147,9 +234,13 @@ function initSingleNoteQuestion(): void {
     return;
   }
 
-  // Pick a random variant
+  // Prioritize unplayed variants if any exist
+  const unplayedVariants = getUnplayedSingleNoteVariants(persistentState);
+  const variantsToChooseFrom = unplayedVariants.length > 0 ? unplayedVariants : unlockedVariants;
+
+  // Pick a random variant (preferring unplayed)
   const selectedVariant =
-    unlockedVariants[Math.floor(Math.random() * unlockedVariants.length)];
+    variantsToChooseFrom[Math.floor(Math.random() * variantsToChooseFrom.length)];
   const { pair, octaves } = parseVariantKey(selectedVariant);
   const [pairNote1, pairNote2] = pair.split("-") as [FullTone, FullTone];
 
@@ -227,9 +318,14 @@ function initTwoNoteQuestion(): boolean {
     return a === targetNote || b === targetNote;
   });
 
-  // Pick a random matching variant
+  // Prioritize unplayed variants if any exist for this target
+  const unplayedVariants = getUnplayedTwoToneVariants(persistentState);
+  const unplayedMatching = matchingVariants.filter((v) => unplayedVariants.includes(v));
+  const variantsToChooseFrom = unplayedMatching.length > 0 ? unplayedMatching : matchingVariants;
+
+  // Pick a random variant (preferring unplayed)
   const selectedVariant =
-    matchingVariants[Math.floor(Math.random() * matchingVariants.length)];
+    variantsToChooseFrom[Math.floor(Math.random() * variantsToChooseFrom.length)];
   const { pair, octaves } = parseVariantKey(selectedVariant);
   const [octave1, octave2] = octaves as [number, number];
   const [pairNote1, pairNote2] = pair.split("-") as [FullTone, FullTone];

@@ -123,6 +123,8 @@ export interface ToneQuizState {
 
   // Accelerated mode: unlock on every correct answer when streak >= 10
   globalCorrectStreak: number; // Consecutive correct answers across all questions
+  forcedNextVariant: string | null; // Variant to use for next question (set by accelerated mode)
+  playedVariants: string[]; // Variants that have been asked at least once
 
   // Pending note unlocks (only for new notes, not variant unlocks)
   pendingUnlocks: PendingUnlock[]; // Queue of note unlocks waiting for cooldown
@@ -149,6 +151,8 @@ function createInitialState(): ToneQuizState {
     pairStreaks: {},
     recentSingleNoteResults: [],
     globalCorrectStreak: 0,
+    forcedNextVariant: null,
+    playedVariants: [],
     pendingUnlocks: [],
     questionsSinceLastUnlock: 0,
     pairCards: {},
@@ -470,7 +474,7 @@ export function recordVariantResult(
 /**
  * Force unlock the next available thing (accelerated mode).
  * Priority: variant for existing pairs first, then new notes.
- * Returns updated state with something unlocked (if possible).
+ * Returns updated state with something unlocked and forcedNextVariant set.
  */
 export function forceUnlockNext(state: ToneQuizState): ToneQuizState {
   // First, try to unlock the next variant for any existing pair
@@ -484,6 +488,7 @@ export function forceUnlockNext(state: ToneQuizState): ToneQuizState {
           ...state,
           unlockedVariants: [...state.unlockedVariants, nextVariant],
           questionsSinceLastUnlock: 0,
+          forcedNextVariant: nextVariant, // Use this variant for next question
         };
       }
     }
@@ -514,9 +519,48 @@ export function forceUnlockNext(state: ToneQuizState): ToneQuizState {
 
   if (newVariants.length > 0) {
     newState.unlockedVariants = [...newState.unlockedVariants, ...newVariants];
+    // Use first new variant for next question
+    newState.forcedNextVariant = newVariants[0];
   }
 
   return newState;
+}
+
+/**
+ * Consume the forced next variant (if any) and return it.
+ * Clears the forcedNextVariant from state.
+ * Returns [variant, updatedState] or [null, state] if none.
+ */
+export function consumeForcedVariant(
+  state: ToneQuizState
+): [string | null, ToneQuizState] {
+  const variant = state.forcedNextVariant;
+  if (!variant) {
+    return [null, state];
+  }
+  return [variant, { ...state, forcedNextVariant: null }];
+}
+
+/**
+ * Get unlocked variants that haven't been played yet.
+ */
+export function getUnplayedVariants(state: ToneQuizState): string[] {
+  const played = new Set(state.playedVariants ?? []);
+  return state.unlockedVariants.filter((v) => !played.has(v));
+}
+
+/**
+ * Get unplayed two-tone variants.
+ */
+export function getUnplayedTwoToneVariants(state: ToneQuizState): string[] {
+  return getUnplayedVariants(state).filter((v) => v.includes(":two-note:"));
+}
+
+/**
+ * Get unplayed single-note variants.
+ */
+export function getUnplayedSingleNoteVariants(state: ToneQuizState): string[] {
+  return getUnplayedVariants(state).filter((v) => v.includes(":single-note:"));
 }
 
 /**
@@ -1001,12 +1045,19 @@ export function recordQuestion(
   // Update global correct streak (for accelerated mode)
   const newGlobalStreak = record.correct ? (state.globalCorrectStreak ?? 0) + 1 : 0;
 
+  // Track this variant as played
+  const playedVariants = state.playedVariants ?? [];
+  const newPlayedVariants = record.variantKey && !playedVariants.includes(record.variantKey)
+    ? [...playedVariants, record.variantKey]
+    : playedVariants;
+
   let newState: ToneQuizState = {
     ...state,
     history: [...state.history, record],
     lastPlayedAt: record.timestamp,
     questionsSinceLastUnlock: state.questionsSinceLastUnlock + 1,
     globalCorrectStreak: newGlobalStreak,
+    playedVariants: newPlayedVariants,
   };
 
   // Accelerated mode: when on a streak of 10+, unlock something on each correct answer
