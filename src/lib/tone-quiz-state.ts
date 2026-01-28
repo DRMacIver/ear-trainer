@@ -14,6 +14,20 @@ export { Grade };
 export const FULL_TONES = ["C", "D", "E", "F", "G", "A", "B"] as const;
 export type FullTone = (typeof FULL_TONES)[number];
 
+/** Semitone values for each note (C=0, D=2, etc.) */
+export const NOTE_SEMITONES: Record<FullTone, number> = {
+  C: 0,
+  D: 2,
+  E: 4,
+  F: 5,
+  G: 7,
+  A: 9,
+  B: 11,
+};
+
+/** Available octaves for all notes (no progression - all available from start) */
+export const AVAILABLE_OCTAVES = [3, 4, 5] as const;
+
 /** Order to introduce notes: C and G first (well separated), then fill in */
 export const LEARNING_ORDER: FullTone[] = ["C", "G", "E", "A", "D", "F", "B"];
 
@@ -68,10 +82,6 @@ export interface ToneQuizState {
   // e.g., singleNotePerformance["C"]["G"] tracks "identify C when choice is C vs G"
   singleNotePerformance: Record<string, Record<string, boolean[]>>;
 
-  // Octave progression: tracks which octaves are unlocked per note
-  // All notes start with [4], unlock 3 or 5 based on mastery
-  unlockedOctaves: Record<FullTone, number[]>;
-
   // Sticky target state
   currentTarget: FullTone | null;
   currentTargetOctave: number | null;
@@ -87,15 +97,6 @@ export interface ToneQuizState {
   session: SessionInfo;
 }
 
-/** Create default unlocked octaves - all notes start with octave 4 only */
-function createDefaultUnlockedOctaves(): Record<FullTone, number[]> {
-  const result: Partial<Record<FullTone, number[]>> = {};
-  for (const note of FULL_TONES) {
-    result[note] = [4];
-  }
-  return result as Record<FullTone, number[]>;
-}
-
 function createInitialState(): ToneQuizState {
   return {
     history: [],
@@ -103,7 +104,6 @@ function createInitialState(): ToneQuizState {
     learningVocabulary: ["C", "G"], // Start with C and G
     performance: {},
     singleNotePerformance: {},
-    unlockedOctaves: createDefaultUnlockedOctaves(),
     currentTarget: null,
     currentTargetOctave: null,
     correctStreak: 0,
@@ -131,7 +131,6 @@ export function loadState(): ToneQuizState {
     ...parsed,
     // Ensure new fields have defaults (migration from older state)
     singleNotePerformance: parsed.singleNotePerformance ?? {},
-    unlockedOctaves: parsed.unlockedOctaves ?? createDefaultUnlockedOctaves(),
     pairCards: parsed.pairCards ?? {},
     session: parsed.session ?? {
       sessionStartTime: Date.now(),
@@ -285,42 +284,6 @@ export function selectLeastPracticedNote(state: ToneQuizState): FullTone {
   }
 
   return candidates[Math.floor(Math.random() * candidates.length)];
-}
-
-/**
- * Get the maximum distance between any two notes (half the scale, rounded down).
- */
-function getMaxNoteDistance(): number {
-  return Math.floor(FULL_TONES.length / 2); // 3 for 7 notes
-}
-
-/**
- * Get all unlocked distances for a target note.
- * Starts with max distance, unlocks closer distances as user becomes familiar.
- */
-export function getUnlockedDistances(
-  state: ToneQuizState,
-  target: FullTone
-): number[] {
-  const maxDist = getMaxNoteDistance();
-  const unlocked: number[] = [maxDist]; // Always allow max distance
-
-  // Check if familiar with all notes at each distance, starting from max
-  for (let dist = maxDist; dist > 1; dist--) {
-    const notesAtDist = FULL_TONES.filter(
-      (n) => n !== target && getNoteDistance(target, n) === dist
-    );
-    const allFamiliar = notesAtDist.every((n) =>
-      isFamiliarWith(state, target, n)
-    );
-    if (allFamiliar) {
-      unlocked.push(dist - 1);
-    } else {
-      break; // Stop unlocking if not all familiar at this distance
-    }
-  }
-
-  return unlocked;
 }
 
 /**
@@ -744,54 +707,6 @@ export function recordQuestion(
 }
 
 /**
- * Select an "other" note for a question about the target.
- * - 45% chance to pick from vocab
- * - 10% chance to pick next candidate note (for introduction testing)
- * - 45% chance to pick from full pool
- * - Only picks notes at unlocked distances (starts far, gets closer as user improves)
- */
-export function selectOtherNote(
-  state: ToneQuizState,
-  target: FullTone
-): FullTone {
-  // Get unlocked distances for this target
-  const unlocked = getUnlockedDistances(state, target);
-
-  // Roll for pool selection: 45% vocab, 10% candidate, 45% full
-  const roll = Math.random();
-  const candidate = getNextNoteToLearn(state);
-
-  // 10% chance for candidate note (between 0.45 and 0.55)
-  if (roll >= 0.45 && roll < 0.55 && candidate && candidate !== target) {
-    return candidate;
-  }
-
-  // 45% vocab (0-0.45), 45% full pool (0.55-1.0)
-  const useVocab = roll < 0.45;
-  const pool = useVocab
-    ? state.learningVocabulary.filter((n) => n !== target)
-    : FULL_TONES.filter((n) => n !== target);
-
-  // Filter to only notes at unlocked distances
-  const available = pool.filter((n) =>
-    unlocked.includes(getNoteDistance(target, n))
-  );
-
-  if (available.length > 0) {
-    return available[Math.floor(Math.random() * available.length)];
-  }
-
-  // Fallback: if nothing available at unlocked distances, use any from pool
-  if (pool.length > 0) {
-    return pool[Math.floor(Math.random() * pool.length)];
-  }
-
-  // Ultimate fallback: any note except target
-  const fallback = FULL_TONES.filter((n) => n !== target);
-  return fallback[Math.floor(Math.random() * fallback.length)];
-}
-
-/**
  * Select target note, respecting stickiness.
  * Stays on same target until user gets STREAK_LENGTH correct in a row.
  * Returns [target, octave, isNewTarget, isFirstOnTarget, updatedState, introducedNote]
@@ -898,142 +813,95 @@ export function randomizeOrder<T>(a: T, b: T): [T, T] {
 }
 
 // ============================================================================
-// Octave Progression Functions
+// Vocabulary-Based Note and Octave Selection Functions
 // ============================================================================
 
 /**
- * Get the unlocked octaves for a note.
- * Returns array of octaves the user has unlocked (starts with [4]).
+ * Pick a random octave from available octaves (3, 4, or 5).
  */
-export function getUnlockedOctavesForNote(
-  state: ToneQuizState,
-  note: FullTone
-): number[] {
-  return state.unlockedOctaves[note] ?? [4];
+export function pickRandomOctave(): number {
+  return AVAILABLE_OCTAVES[Math.floor(Math.random() * AVAILABLE_OCTAVES.length)];
 }
 
 /**
- * Get the next octave to introduce for a note.
- * Top-half notes (E, F, G, A, B) get octave 3 first.
- * Bottom-half notes (C, D) get octave 5 first.
- * Third octave is whichever wasn't introduced yet.
+ * Select two different notes from the vocabulary for a two-note question.
+ * Returns [noteA, noteB] where both are from the learning vocabulary.
  */
-export function getNextOctaveToIntroduce(
-  state: ToneQuizState,
-  note: FullTone
-): number | null {
-  const unlocked = getUnlockedOctavesForNote(state, note);
-
-  // All three octaves unlocked
-  if (unlocked.length >= 3) {
-    return null;
-  }
-
-  // Determine first additional octave based on note position
-  const isTopHalf = ["E", "F", "G", "A", "B"].includes(note);
-  const firstAdditional = isTopHalf ? 3 : 5;
-  const secondAdditional = isTopHalf ? 5 : 3;
-
-  if (!unlocked.includes(firstAdditional)) {
-    return firstAdditional;
-  }
-  if (!unlocked.includes(secondAdditional)) {
-    return secondAdditional;
-  }
-
-  return null;
-}
-
-/**
- * Check if a note is ready for a new octave.
- * A note is ready when:
- * 1. Single-note questions: familiar with all pairs involving this note
- * 2. Two-note questions: familiar with all adjacent pairs involving this note
- */
-export function isNoteReadyForNewOctave(
-  state: ToneQuizState,
-  note: FullTone
-): boolean {
-  // Must be in learning vocabulary
-  if (!state.learningVocabulary.includes(note)) {
-    return false;
-  }
-
-  // Must have another octave to unlock
-  if (getNextOctaveToIntroduce(state, note) === null) {
-    return false;
-  }
-
+export function selectVocabPair(state: ToneQuizState): [FullTone, FullTone] {
   const vocab = state.learningVocabulary;
-
-  // Check single-note familiarity with all vocab notes
-  for (const other of vocab) {
-    if (other === note) continue;
-    if (!isSingleNotePairFamiliar(state, note, other)) {
-      return false;
-    }
+  if (vocab.length < 2) {
+    throw new Error("Vocabulary must have at least 2 notes");
   }
 
-  // Check two-note familiarity with adjacent notes (in full chromatic scale)
-  const [lower, upper] = getAdjacentNotes(note);
-  if (vocab.includes(lower) && !isFamiliarWith(state, note, lower)) {
-    return false;
-  }
-  if (vocab.includes(upper) && !isFamiliarWith(state, note, upper)) {
-    return false;
-  }
+  // Pick first note randomly
+  const idx1 = Math.floor(Math.random() * vocab.length);
+  const noteA = vocab[idx1];
 
-  return true;
+  // Pick second note randomly (different from first)
+  let idx2 = Math.floor(Math.random() * (vocab.length - 1));
+  if (idx2 >= idx1) idx2++; // Shift to skip idx1
+  const noteB = vocab[idx2];
+
+  return [noteA, noteB];
 }
 
 /**
- * Introduce a new octave for a note.
- * Returns updated state with the octave added to unlockedOctaves.
+ * Get the pitch value for a note at a given octave.
+ * Pitch = semitones + octave * 12
  */
-export function introduceOctave(
-  state: ToneQuizState,
-  note: FullTone,
-  octave: number
-): ToneQuizState {
-  const currentOctaves = getUnlockedOctavesForNote(state, note);
-  if (currentOctaves.includes(octave)) {
-    return state; // Already unlocked
-  }
-
-  return {
-    ...state,
-    unlockedOctaves: {
-      ...state.unlockedOctaves,
-      [note]: [...currentOctaves, octave].sort((a, b) => a - b),
-    },
-  };
+export function getNotePitch(note: FullTone, octave: number): number {
+  return NOTE_SEMITONES[note] + octave * 12;
 }
 
 /**
- * Pick a random octave from the unlocked octaves for a note.
+ * Get all valid octave pairs for two notes where one must be higher than the other.
+ * Returns array of [higherOctave, lowerOctave] pairs where:
+ * - Both octaves are in {3, 4, 5}
+ * - |octave1 - octave2| <= 1 (same or adjacent octaves)
+ * - Higher note's pitch > lower note's pitch
+ *
+ * @param higherNote - The note that should be higher in pitch
+ * @param lowerNote - The note that should be lower in pitch
+ * @returns Array of valid [higherOctave, lowerOctave] pairs
  */
-export function pickRandomUnlockedOctave(
-  state: ToneQuizState,
-  note: FullTone
-): number {
-  const unlocked = getUnlockedOctavesForNote(state, note);
-  return unlocked[Math.floor(Math.random() * unlocked.length)];
-}
+export function getValidOctavePairs(
+  higherNote: FullTone,
+  lowerNote: FullTone
+): Array<[number, number]> {
+  const validPairs: Array<[number, number]> = [];
 
-/**
- * Find a note that is ready for octave introduction.
- * Returns the note and the octave to introduce, or null if none ready.
- */
-export function findNoteReadyForOctaveIntro(
-  state: ToneQuizState
-): { note: FullTone; octave: number } | null {
-  for (const note of state.learningVocabulary) {
-    if (isNoteReadyForNewOctave(state, note)) {
-      const octave = getNextOctaveToIntroduce(state, note);
-      if (octave !== null) {
-        return { note, octave };
+  for (const higherOctave of AVAILABLE_OCTAVES) {
+    for (const lowerOctave of AVAILABLE_OCTAVES) {
+      // Must be same or adjacent octaves (no 3+5 pairs)
+      if (Math.abs(higherOctave - lowerOctave) > 1) continue;
+
+      const higherPitch = getNotePitch(higherNote, higherOctave);
+      const lowerPitch = getNotePitch(lowerNote, lowerOctave);
+
+      // Higher note must actually be higher in pitch
+      if (higherPitch > lowerPitch) {
+        validPairs.push([higherOctave, lowerOctave]);
       }
     }
   }
-  return null;
+
+  return validPairs;
 }
+
+/**
+ * Select octaves for a two-note question where one note should be higher.
+ * Randomly selects from valid octave combinations.
+ *
+ * @param higherNote - The note that should be higher in pitch
+ * @param lowerNote - The note that should be lower in pitch
+ * @returns [higherOctave, lowerOctave] or null if no valid combination exists
+ */
+export function selectOctavesForPair(
+  higherNote: FullTone,
+  lowerNote: FullTone
+): [number, number] | null {
+  const validPairs = getValidOctavePairs(higherNote, lowerNote);
+  if (validPairs.length === 0) return null;
+  return validPairs[Math.floor(Math.random() * validPairs.length)];
+}
+

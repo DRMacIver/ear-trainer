@@ -7,7 +7,6 @@ import {
   updateStreak,
   randomizeOrder,
   selectTargetNote,
-  selectOtherNote,
   isFamiliarWith,
   isNoteFamiliar,
   getAdjacentNotes,
@@ -30,13 +29,13 @@ import {
   selectSingleNotePair,
   getTargetQuestionCounts,
   selectLeastPracticedNote,
-  getUnlockedDistances,
-  getUnlockedOctavesForNote,
-  getNextOctaveToIntroduce,
-  isNoteReadyForNewOctave,
-  introduceOctave,
-  pickRandomUnlockedOctave,
-  findNoteReadyForOctaveIntro,
+  selectVocabPair,
+  getValidOctavePairs,
+  selectOctavesForPair,
+  pickRandomOctave,
+  getNotePitch,
+  NOTE_SEMITONES,
+  AVAILABLE_OCTAVES,
   Grade,
   FullTone,
   FULL_TONES,
@@ -472,24 +471,6 @@ describe("selectTargetNote", () => {
   });
 });
 
-describe("selectOtherNote", () => {
-  beforeEach(() => {
-    localStorageMock.clear();
-  });
-
-  it("selects a different note than target", () => {
-    const state = loadState();
-    const other = selectOtherNote(state, "C");
-    expect(other).not.toBe("C");
-  });
-
-  it("selects from FULL_TONES", () => {
-    const state = loadState();
-    const other = selectOtherNote(state, "C");
-    expect(FULL_TONES).toContain(other);
-  });
-});
-
 describe("getTargetQuestionCounts", () => {
   beforeEach(() => {
     localStorageMock.clear();
@@ -546,69 +527,6 @@ describe("selectLeastPracticedNote", () => {
     // Should select both at some point
     expect(results.has("C")).toBe(true);
     expect(results.has("G")).toBe(true);
-  });
-});
-
-describe("getUnlockedDistances", () => {
-  beforeEach(() => {
-    localStorageMock.clear();
-  });
-
-  it("always includes max distance (3)", () => {
-    const state = loadState();
-    const unlocked = getUnlockedDistances(state, "C");
-    expect(unlocked).toContain(3);
-  });
-
-  it("only includes max distance when not familiar with any", () => {
-    const state = loadState();
-    const unlocked = getUnlockedDistances(state, "C");
-    expect(unlocked).toEqual([3]);
-  });
-
-  it("unlocks distance 2 when familiar with all at distance 3", () => {
-    let state = loadState();
-    // C's distance-3 notes are F and G
-    state.performance = {
-      C: {
-        F: [true, true, true, true],
-        G: [true, true, true, true],
-      },
-    };
-    const unlocked = getUnlockedDistances(state, "C");
-    expect(unlocked).toContain(3);
-    expect(unlocked).toContain(2);
-  });
-
-  it("unlocks distance 1 when familiar with distances 3 and 2", () => {
-    let state = loadState();
-    // C's distance-3 notes are F and G
-    // C's distance-2 notes are E and A
-    state.performance = {
-      C: {
-        F: [true, true, true, true],
-        G: [true, true, true, true],
-        E: [true, true, true, true],
-        A: [true, true, true, true],
-      },
-    };
-    const unlocked = getUnlockedDistances(state, "C");
-    expect(unlocked).toContain(3);
-    expect(unlocked).toContain(2);
-    expect(unlocked).toContain(1);
-  });
-
-  it("does not unlock closer distance if not familiar with all at current", () => {
-    let state = loadState();
-    // Only familiar with F (distance 3), not G
-    state.performance = {
-      C: {
-        F: [true, true, true, true],
-        // G is missing
-      },
-    };
-    const unlocked = getUnlockedDistances(state, "C");
-    expect(unlocked).toEqual([3]);
   });
 });
 
@@ -1677,262 +1595,164 @@ describe("Note introduction gates on single-note familiarity", () => {
 });
 
 // ============================================================================
-// Octave Progression Tests
+// Vocabulary-Based Note and Octave Selection Tests
 // ============================================================================
 
-describe("Octave progression functions", () => {
+describe("NOTE_SEMITONES and AVAILABLE_OCTAVES", () => {
+  it("NOTE_SEMITONES has correct values", () => {
+    expect(NOTE_SEMITONES["C"]).toBe(0);
+    expect(NOTE_SEMITONES["D"]).toBe(2);
+    expect(NOTE_SEMITONES["E"]).toBe(4);
+    expect(NOTE_SEMITONES["F"]).toBe(5);
+    expect(NOTE_SEMITONES["G"]).toBe(7);
+    expect(NOTE_SEMITONES["A"]).toBe(9);
+    expect(NOTE_SEMITONES["B"]).toBe(11);
+  });
+
+  it("AVAILABLE_OCTAVES contains 3, 4, and 5", () => {
+    expect(AVAILABLE_OCTAVES).toEqual([3, 4, 5]);
+  });
+});
+
+describe("getNotePitch", () => {
+  it("calculates correct pitch for notes", () => {
+    // Pitch = semitones + octave * 12
+    expect(getNotePitch("C", 4)).toBe(0 + 4 * 12); // 48
+    expect(getNotePitch("G", 4)).toBe(7 + 4 * 12); // 55
+    expect(getNotePitch("C", 5)).toBe(0 + 5 * 12); // 60
+    expect(getNotePitch("G", 3)).toBe(7 + 3 * 12); // 43
+  });
+
+  it("correctly orders pitches across octaves", () => {
+    expect(getNotePitch("G", 4)).toBeGreaterThan(getNotePitch("C", 4));
+    expect(getNotePitch("C", 5)).toBeGreaterThan(getNotePitch("G", 4));
+    expect(getNotePitch("G", 3)).toBeLessThan(getNotePitch("C", 4));
+  });
+});
+
+describe("pickRandomOctave", () => {
+  it("returns one of the available octaves (3, 4, or 5)", () => {
+    const results = new Set<number>();
+    for (let i = 0; i < 100; i++) {
+      results.add(pickRandomOctave());
+    }
+
+    // Should only include valid octaves
+    for (const octave of results) {
+      expect([3, 4, 5]).toContain(octave);
+    }
+
+    // Should include all three octaves at some point (probabilistic)
+    expect(results.size).toBe(3);
+  });
+});
+
+describe("selectVocabPair", () => {
   beforeEach(() => {
     localStorageMock.clear();
   });
 
-  describe("getUnlockedOctavesForNote", () => {
-    it("returns [4] for all notes initially", () => {
-      const state = loadState();
-      for (const note of FULL_TONES) {
-        expect(getUnlockedOctavesForNote(state, note)).toEqual([4]);
+  it("returns two different notes from vocabulary", () => {
+    const state = loadState();
+    const [noteA, noteB] = selectVocabPair(state);
+    expect(noteA).not.toBe(noteB);
+    expect(state.learningVocabulary).toContain(noteA);
+    expect(state.learningVocabulary).toContain(noteB);
+  });
+
+  it("throws error if vocabulary has fewer than 2 notes", () => {
+    const state = loadState();
+    state.learningVocabulary = ["C"];
+    expect(() => selectVocabPair(state)).toThrow();
+  });
+
+  it("selects from vocabulary of 3+ notes", () => {
+    const state = loadState();
+    state.learningVocabulary = ["C", "G", "E", "A"];
+
+    const results = new Set<string>();
+    for (let i = 0; i < 50; i++) {
+      const [a, b] = selectVocabPair(state);
+      results.add(a);
+      results.add(b);
+    }
+
+    // Should select from multiple notes in vocabulary
+    expect(results.size).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe("getValidOctavePairs", () => {
+  it("returns valid pairs when higher note has more semitones", () => {
+    // G (7 semitones) higher than C (0 semitones)
+    const pairs = getValidOctavePairs("G", "C");
+    expect(pairs.length).toBeGreaterThan(0);
+
+    // All pairs should have G higher in pitch than C
+    for (const [gOctave, cOctave] of pairs) {
+      expect(getNotePitch("G", gOctave)).toBeGreaterThan(getNotePitch("C", cOctave));
+    }
+  });
+
+  it("excludes octave pairs more than 1 apart", () => {
+    const pairs = getValidOctavePairs("G", "C");
+
+    // No pairs should have octaves 3 and 5 together
+    for (const [octaveA, octaveB] of pairs) {
+      expect(Math.abs(octaveA - octaveB)).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("works when higher note needs higher octave", () => {
+    // C higher than G: C must be in higher octave to be higher pitch
+    const pairs = getValidOctavePairs("C", "G");
+    expect(pairs.length).toBeGreaterThan(0);
+
+    // C4 (48) < G4 (55), but C5 (60) > G4 (55)
+    // So valid pairs include C5-G4
+    const hasC5G4 = pairs.some(([cOct, gOct]) => cOct === 5 && gOct === 4);
+    expect(hasC5G4).toBe(true);
+  });
+
+  it("allows same octave when semitone relationship is correct", () => {
+    // G4 > C4 (same octave)
+    const pairs = getValidOctavePairs("G", "C");
+    const hasSameOctave = pairs.some(([gOct, cOct]) => gOct === cOct);
+    expect(hasSameOctave).toBe(true);
+  });
+
+  it("works for adjacent notes", () => {
+    // D higher than C
+    const pairs = getValidOctavePairs("D", "C");
+    expect(pairs.length).toBeGreaterThan(0);
+
+    // D4 > C4 should be valid
+    expect(pairs).toContainEqual([4, 4]);
+  });
+});
+
+describe("selectOctavesForPair", () => {
+  it("returns a valid octave pair", () => {
+    const result = selectOctavesForPair("G", "C");
+    expect(result).not.toBeNull();
+
+    if (result) {
+      const [gOctave, cOctave] = result;
+      expect(getNotePitch("G", gOctave)).toBeGreaterThan(getNotePitch("C", cOctave));
+      expect(Math.abs(gOctave - cOctave)).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("selects randomly from valid pairs", () => {
+    const results = new Set<string>();
+    for (let i = 0; i < 50; i++) {
+      const pair = selectOctavesForPair("G", "C");
+      if (pair) {
+        results.add(JSON.stringify(pair));
       }
-    });
+    }
 
-    it("returns unlocked octaves from state", () => {
-      let state = loadState();
-      state.unlockedOctaves = {
-        ...state.unlockedOctaves,
-        C: [4, 5],
-        G: [3, 4],
-      };
-      expect(getUnlockedOctavesForNote(state, "C")).toEqual([4, 5]);
-      expect(getUnlockedOctavesForNote(state, "G")).toEqual([3, 4]);
-      expect(getUnlockedOctavesForNote(state, "E")).toEqual([4]); // Unchanged
-    });
-  });
-
-  describe("getNextOctaveToIntroduce", () => {
-    it("returns octave 3 for top-half notes (E, F, G, A, B)", () => {
-      const state = loadState();
-      expect(getNextOctaveToIntroduce(state, "E")).toBe(3);
-      expect(getNextOctaveToIntroduce(state, "F")).toBe(3);
-      expect(getNextOctaveToIntroduce(state, "G")).toBe(3);
-      expect(getNextOctaveToIntroduce(state, "A")).toBe(3);
-      expect(getNextOctaveToIntroduce(state, "B")).toBe(3);
-    });
-
-    it("returns octave 5 for bottom-half notes (C, D)", () => {
-      const state = loadState();
-      expect(getNextOctaveToIntroduce(state, "C")).toBe(5);
-      expect(getNextOctaveToIntroduce(state, "D")).toBe(5);
-    });
-
-    it("returns second octave when first is already unlocked", () => {
-      let state = loadState();
-      // G has octave 3 unlocked, should get 5 next
-      state.unlockedOctaves = { ...state.unlockedOctaves, G: [3, 4] };
-      expect(getNextOctaveToIntroduce(state, "G")).toBe(5);
-
-      // C has octave 5 unlocked, should get 3 next
-      state.unlockedOctaves = { ...state.unlockedOctaves, C: [4, 5] };
-      expect(getNextOctaveToIntroduce(state, "C")).toBe(3);
-    });
-
-    it("returns null when all three octaves are unlocked", () => {
-      let state = loadState();
-      state.unlockedOctaves = { ...state.unlockedOctaves, G: [3, 4, 5] };
-      expect(getNextOctaveToIntroduce(state, "G")).toBeNull();
-    });
-  });
-
-  describe("isNoteReadyForNewOctave", () => {
-    it("returns false for notes not in vocabulary", () => {
-      const state = loadState();
-      // E is not in initial vocab ["C", "G"]
-      expect(isNoteReadyForNewOctave(state, "E")).toBe(false);
-    });
-
-    it("returns false when note has no more octaves to unlock", () => {
-      let state = loadState();
-      state.unlockedOctaves = { ...state.unlockedOctaves, C: [3, 4, 5] };
-      expect(isNoteReadyForNewOctave(state, "C")).toBe(false);
-    });
-
-    it("returns false when not familiar with all single-note pairs", () => {
-      let state = loadState();
-      // C is in vocab but not single-note familiar with G
-      expect(isNoteReadyForNewOctave(state, "C")).toBe(false);
-    });
-
-    it("returns true when mastered all requirements", () => {
-      let state = loadState();
-      // C and G are in vocab
-      // Set up single-note familiarity between C and G
-      state.singleNotePerformance = {
-        C: { G: [true, true, true, true] },
-        G: { C: [true, true, true, true] },
-      };
-      // Set up two-note familiarity with adjacent notes (C adjacent to B and D)
-      // Since B and D are not in vocab, this requirement is satisfied
-      expect(isNoteReadyForNewOctave(state, "C")).toBe(true);
-    });
-
-    it("returns false when adjacent note in vocab is not familiar", () => {
-      let state = loadState();
-      state.learningVocabulary = ["B", "C", "D"]; // B and D are adjacent to C
-      // Set up single-note familiarity
-      state.singleNotePerformance = {
-        B: {
-          C: [true, true, true, true],
-          D: [true, true, true, true],
-        },
-        C: {
-          B: [true, true, true, true],
-          D: [true, true, true, true],
-        },
-        D: {
-          B: [true, true, true, true],
-          C: [true, true, true, true],
-        },
-      };
-      // But missing two-note familiarity with adjacent notes
-      // C -> B is not familiar
-      expect(isNoteReadyForNewOctave(state, "C")).toBe(false);
-
-      // Add two-note familiarity
-      state.performance = {
-        C: {
-          B: [true, true, true, true],
-          D: [true, true, true, true],
-        },
-      };
-      expect(isNoteReadyForNewOctave(state, "C")).toBe(true);
-    });
-  });
-
-  describe("introduceOctave", () => {
-    it("adds new octave to unlockedOctaves", () => {
-      let state = loadState();
-      expect(getUnlockedOctavesForNote(state, "C")).toEqual([4]);
-
-      state = introduceOctave(state, "C", 5);
-      expect(getUnlockedOctavesForNote(state, "C")).toEqual([4, 5]);
-    });
-
-    it("keeps octaves sorted", () => {
-      let state = loadState();
-      state = introduceOctave(state, "G", 3);
-      expect(getUnlockedOctavesForNote(state, "G")).toEqual([3, 4]);
-    });
-
-    it("does not duplicate already unlocked octave", () => {
-      let state = loadState();
-      state = introduceOctave(state, "C", 4); // 4 is already unlocked
-      expect(getUnlockedOctavesForNote(state, "C")).toEqual([4]);
-    });
-
-    it("does not affect other notes", () => {
-      let state = loadState();
-      state = introduceOctave(state, "C", 5);
-      expect(getUnlockedOctavesForNote(state, "C")).toEqual([4, 5]);
-      expect(getUnlockedOctavesForNote(state, "G")).toEqual([4]); // Unchanged
-    });
-  });
-
-  describe("pickRandomUnlockedOctave", () => {
-    it("returns the only octave when one is unlocked", () => {
-      const state = loadState();
-      expect(pickRandomUnlockedOctave(state, "C")).toBe(4);
-    });
-
-    it("returns one of the unlocked octaves when multiple are available", () => {
-      let state = loadState();
-      state.unlockedOctaves = { ...state.unlockedOctaves, C: [3, 4, 5] };
-
-      const results = new Set<number>();
-      for (let i = 0; i < 100; i++) {
-        results.add(pickRandomUnlockedOctave(state, "C"));
-      }
-
-      // Should include all three octaves at some point
-      expect(results.has(3)).toBe(true);
-      expect(results.has(4)).toBe(true);
-      expect(results.has(5)).toBe(true);
-      // Should not include any other octaves
-      expect(results.size).toBe(3);
-    });
-  });
-
-  describe("findNoteReadyForOctaveIntro", () => {
-    it("returns null when no notes are ready", () => {
-      const state = loadState();
-      expect(findNoteReadyForOctaveIntro(state)).toBeNull();
-    });
-
-    it("returns note and octave when a note is ready", () => {
-      let state = loadState();
-      // Set up C as ready for octave introduction
-      state.singleNotePerformance = {
-        C: { G: [true, true, true, true] },
-        G: { C: [true, true, true, true] },
-      };
-
-      const result = findNoteReadyForOctaveIntro(state);
-      expect(result).not.toBeNull();
-      // Either C or G could be ready (both meet the criteria)
-      expect(["C", "G"]).toContain(result!.note);
-      // C should get octave 5, G should get octave 3
-      if (result!.note === "C") {
-        expect(result!.octave).toBe(5);
-      } else {
-        expect(result!.octave).toBe(3);
-      }
-    });
-  });
-
-  describe("Third octave unlock", () => {
-    it("unlocks third octave after mastering first two", () => {
-      let state = loadState();
-      // G starts with [4], gets [3, 4] after first unlock
-      state = introduceOctave(state, "G", 3);
-      expect(getUnlockedOctavesForNote(state, "G")).toEqual([3, 4]);
-
-      // Next octave should be 5
-      expect(getNextOctaveToIntroduce(state, "G")).toBe(5);
-
-      // After unlocking 5, should have all three
-      state = introduceOctave(state, "G", 5);
-      expect(getUnlockedOctavesForNote(state, "G")).toEqual([3, 4, 5]);
-
-      // No more octaves to unlock
-      expect(getNextOctaveToIntroduce(state, "G")).toBeNull();
-    });
-  });
-
-  describe("State migration for unlockedOctaves", () => {
-    it("adds default unlockedOctaves for old state", () => {
-      // Simulate old state without unlockedOctaves
-      const oldState = {
-        history: [],
-        lastPlayedAt: null,
-        learningVocabulary: ["C", "G"],
-        performance: {},
-        singleNotePerformance: {},
-        currentTarget: null,
-        currentTargetOctave: null,
-        correctStreak: 0,
-        isFirstOnTarget: true,
-        candidateStreaks: {},
-        questionsSinceLastIntroduction: 0,
-        pairCards: {},
-        session: {
-          sessionStartTime: Date.now(),
-          previousSessionEnd: null,
-        },
-      };
-      localStorageMock.setItem("tone-quiz-state", JSON.stringify(oldState));
-
-      const loaded = loadState();
-
-      // Should have default unlocked octaves for all notes
-      for (const note of FULL_TONES) {
-        expect(loaded.unlockedOctaves[note]).toEqual([4]);
-      }
-    });
+    // Should select multiple different valid pairs
+    expect(results.size).toBeGreaterThan(1);
   });
 });

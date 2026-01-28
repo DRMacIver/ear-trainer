@@ -13,16 +13,13 @@ import {
   randomizeOrder,
   recordQuestion,
   selectTargetNote,
-  selectOtherNote,
+  selectOctavesForPair,
+  pickRandomOctave,
   updateStreak,
   maybeStartNewSession,
   getRepeatProbability,
   selectMostUrgentPair,
   getReadySingleNotePairs,
-  findNoteReadyForOctaveIntro,
-  introduceOctave,
-  pickRandomUnlockedOctave,
-  getUnlockedOctavesForNote,
   ToneQuizState,
   FullTone,
   FULL_TONES,
@@ -57,17 +54,9 @@ interface IntroductionState {
   vocabNotes: FullTone[]; // All vocab notes in chromatic order
 }
 
-// Octave introduction mode state (for unlocking new octaves)
-interface OctaveIntroductionState {
-  note: FullTone;
-  newOctave: number;
-  unlockedOctaves: number[]; // All unlocked octaves including the new one
-}
-
 let persistentState: ToneQuizState;
 let question: QuestionState;
 let introState: IntroductionState | null = null;
-let octaveIntroState: OctaveIntroductionState | null = null;
 let keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
 let autoAdvanceTimeout: ReturnType<typeof setTimeout> | null = null;
 let shouldRetry = false; // Whether next advance should retry same question
@@ -82,53 +71,6 @@ const AUTO_ADVANCE_DELAY = 750; // ms
 const RETRY_CHANCE = 1.0; // Always retry after wrong answer until correct
 const REPEAT_CORRECT_CHANCE = 0.3; // 30% chance to repeat after correct answer
 const MAX_SINGLE_NOTE_CYCLE = 6; // Cap single-note cycle at 6 notes
-
-/** Pick octave for target note from unlocked octaves */
-function pickTargetOctave(note: FullTone): number {
-  return pickRandomUnlockedOctave(persistentState, note);
-}
-
-/**
- * Pick octave for the "other" note based on distance from target.
- * Uses octave 3 (for A/B) or octave 5 (for C/D) only if it keeps
- * the note within 4 diatonic steps of the target.
- */
-function pickOtherOctave(target: FullTone, other: FullTone): number {
-  const targetIdx = FULL_TONES.indexOf(target);
-  const otherIdx = FULL_TONES.indexOf(other);
-
-  // Pitch positions relative to C4=0, D4=1, ..., B4=6
-  // Octave 3: B3=-1, A3=-2, etc.
-  // Octave 5: C5=7, D5=8, etc.
-  const targetPitch = targetIdx;
-  const otherPitchOct4 = otherIdx;
-  const otherPitchOct3 = otherIdx - 7;
-  const otherPitchOct5 = otherIdx + 7;
-
-  const distOct4 = Math.abs(otherPitchOct4 - targetPitch);
-  const distOct3 = Math.abs(otherPitchOct3 - targetPitch);
-  const distOct5 = Math.abs(otherPitchOct5 - targetPitch);
-
-  // Use octave 3 for A/B only if it's closer AND within 4 steps
-  if (
-    (other === "A" || other === "B") &&
-    distOct3 <= 4 &&
-    distOct3 < distOct4
-  ) {
-    return 3;
-  }
-
-  // Use octave 5 for C/D only if it's closer AND within 4 steps
-  if (
-    (other === "C" || other === "D") &&
-    distOct5 <= 4 &&
-    distOct5 < distOct4
-  ) {
-    return 5;
-  }
-
-  return 4;
-}
 
 /** Probability of starting a single-note cycle when pairs are available */
 const SINGLE_NOTE_CYCLE_CHANCE = 0.3;
@@ -162,7 +104,6 @@ function startSingleNoteCycle(): void {
 interface InitQuestionResult {
   isNewTarget: boolean;
   introducedNote: FullTone | null;
-  octaveIntro: { note: FullTone; octave: number } | null;
 }
 
 function initQuestion(): InitQuestionResult {
@@ -171,27 +112,16 @@ function initQuestion(): InitQuestionResult {
   // Maybe start new session (if inactive for more than 5 minutes)
   persistentState = maybeStartNewSession(persistentState, now);
 
-  // Check if any note is ready for octave introduction
-  const octaveReady = findNoteReadyForOctaveIntro(persistentState);
-  if (octaveReady) {
-    // Return special result indicating octave introduction needed
-    return {
-      isNewTarget: false,
-      introducedNote: null,
-      octaveIntro: octaveReady,
-    };
-  }
-
   // If we're in a single-note cycle, continue with it
   if (singleNoteQueue.length > 0) {
-    return { ...initSingleNoteQuestion(), octaveIntro: null };
+    return initSingleNoteQuestion();
   }
 
   // Check if we should start a new single-note cycle
   const readyPairs = getReadySingleNotePairs(persistentState);
   if (readyPairs.length > 0 && Math.random() < SINGLE_NOTE_CYCLE_CHANCE) {
     startSingleNoteCycle();
-    return { ...initSingleNoteQuestion(), octaveIntro: null };
+    return initSingleNoteQuestion();
   }
 
   // Roll for repeat based on session freshness
@@ -203,15 +133,12 @@ function initQuestion(): InitQuestionResult {
     const pair = selectMostUrgentPair(persistentState);
     if (pair) {
       // Use FSRS-selected pair
-      return {
-        ...initQuestionFromPair(pair.target, pair.other),
-        octaveIntro: null,
-      };
+      return initQuestionFromPair(pair.target, pair.other);
     }
   }
 
   // Fall through to normal selection
-  return { ...initQuestionNormal(), octaveIntro: null };
+  return initQuestionNormal();
 }
 
 /** Initialize a single-note question using the cycle queue */
@@ -245,8 +172,8 @@ function initSingleNoteQuestion(): {
   // The note we're playing is noteToPlay, the alternative is the other note in the pair
   const alternative = pairNote1 === noteToPlay ? pairNote2 : pairNote1;
 
-  // Pick from unlocked octaves for this note
-  const playedOctave = pickTargetOctave(noteToPlay);
+  // Pick a random octave from available octaves (3, 4, or 5)
+  const playedOctave = pickRandomOctave();
   const playedWithOctave = `${noteToPlay}${playedOctave}`;
 
   // Randomize display order for the choice buttons
@@ -276,9 +203,39 @@ function initQuestionFromPair(
   targetNote: FullTone,
   otherNote: FullTone
 ): { isNewTarget: boolean; introducedNote: FullTone | null } {
-  const targetOctave = pickTargetOctave(targetNote);
-  const otherOctave = pickOtherOctave(targetNote, otherNote);
+  // 50/50 decide which note should be higher in pitch
+  const targetIsHigher = Math.random() < 0.5;
+  const [higherNote, lowerNote] = targetIsHigher
+    ? [targetNote, otherNote]
+    : [otherNote, targetNote];
 
+  // Get valid octave pairs and select one
+  const octavePairs = selectOctavesForPair(higherNote, lowerNote);
+  if (!octavePairs) {
+    // Fallback: use same octave if no valid pairs (shouldn't happen)
+    const fallbackOctave = pickRandomOctave();
+    return initTwoNoteQuestionWithOctaves(
+      targetNote,
+      otherNote,
+      fallbackOctave,
+      fallbackOctave
+    );
+  }
+
+  const [higherOctave, lowerOctave] = octavePairs;
+  const targetOctave = targetIsHigher ? higherOctave : lowerOctave;
+  const otherOctave = targetIsHigher ? lowerOctave : higherOctave;
+
+  return initTwoNoteQuestionWithOctaves(targetNote, otherNote, targetOctave, otherOctave);
+}
+
+/** Helper: Initialize a two-note question with specific octaves */
+function initTwoNoteQuestionWithOctaves(
+  targetNote: FullTone,
+  otherNote: FullTone,
+  targetOctave: number,
+  otherOctave: number
+): { isNewTarget: boolean; introducedNote: FullTone | null } {
   const targetWithOctave = `${targetNote}${targetOctave}`;
   const otherWithOctave = `${otherNote}${otherOctave}`;
 
@@ -329,17 +286,38 @@ function initQuestionNormal(): {
   // Select target note (with stickiness - stays until 3 correct in a row)
   const [
     targetNote,
-    targetOctave,
+    , // octave from selectTargetNote is ignored - we calculate our own
     isNewTarget,
     isFirstOnTarget,
     updatedState,
     introducedNote,
-  ] = selectTargetNote(persistentState, pickTargetOctave);
+  ] = selectTargetNote(persistentState, pickRandomOctave);
   persistentState = updatedState;
 
-  // Select other note based on current learning progress
-  const otherNote = selectOtherNote(persistentState, targetNote);
-  const otherOctave = pickOtherOctave(targetNote, otherNote);
+  // Select other note from vocabulary (vocab-only pairs)
+  const vocab = persistentState.learningVocabulary.filter(n => n !== targetNote);
+  const otherNote = vocab[Math.floor(Math.random() * vocab.length)];
+
+  // 50/50 decide which note should be higher in pitch
+  const targetIsHigher = Math.random() < 0.5;
+  const [higherNote, lowerNote] = targetIsHigher
+    ? [targetNote, otherNote]
+    : [otherNote, targetNote];
+
+  // Get valid octave pairs and select one
+  const octavePairs = selectOctavesForPair(higherNote, lowerNote);
+  let targetOctave: number;
+  let otherOctave: number;
+
+  if (!octavePairs) {
+    // Fallback: use same octave if no valid pairs (shouldn't happen)
+    targetOctave = pickRandomOctave();
+    otherOctave = targetOctave;
+  } else {
+    const [higherOctave, lowerOctave] = octavePairs;
+    targetOctave = targetIsHigher ? higherOctave : lowerOctave;
+    otherOctave = targetIsHigher ? lowerOctave : higherOctave;
+  }
 
   const targetWithOctave = `${targetNote}${targetOctave}`;
   const otherWithOctave = `${otherNote}${otherOctave}`;
@@ -349,6 +327,12 @@ function initQuestionNormal(): {
     { note: targetWithOctave, family: targetNote },
     { note: otherWithOctave, family: otherNote }
   );
+
+  // Update current target octave in state
+  persistentState = {
+    ...persistentState,
+    currentTargetOctave: targetOctave,
+  };
 
   question = {
     questionType: "two-note",
@@ -556,188 +540,6 @@ async function replayIntroSequence(): Promise<void> {
 /** Finish introduction and return to normal quiz */
 function finishIntroduction(): void {
   introState = null;
-  render();
-  playQuestionNotes();
-}
-
-// ============================================================================
-// Octave Introduction Mode
-// ============================================================================
-
-/** Start octave introduction mode for a note getting a new octave */
-function startOctaveIntroduction(note: FullTone, newOctave: number): void {
-  // Update state to unlock the new octave
-  persistentState = introduceOctave(persistentState, note, newOctave);
-  saveState(persistentState);
-
-  // Set up the introduction state
-  octaveIntroState = {
-    note,
-    newOctave,
-    unlockedOctaves: getUnlockedOctavesForNote(persistentState, note),
-  };
-
-  renderOctaveIntroduction();
-  playOctaveIntroductionSequence();
-}
-
-/** Play octave introduction sequence: note in all unlocked octaves, then vocab context */
-async function playOctaveIntroductionSequence(): Promise<void> {
-  if (!octaveIntroState) return;
-
-  isPlaying = true;
-
-  const octaveButtons = document.querySelectorAll(
-    "#octave-intro-buttons .intro-note-btn"
-  );
-  const vocabButtons = document.querySelectorAll(
-    "#octave-vocab-buttons .intro-note-btn"
-  );
-
-  // Play the note in all unlocked octaves (in order)
-  const octaves = octaveIntroState.unlockedOctaves;
-  for (let i = 0; i < octaves.length; i++) {
-    const btn = octaveButtons[i];
-    btn?.classList.add("playing");
-    await playNote(`${octaveIntroState.note}${octaves[i]}`, {
-      duration: INTRO_NOTE_DURATION,
-    });
-    await new Promise((r) => setTimeout(r, INTRO_NOTE_GAP));
-    btn?.classList.remove("playing");
-  }
-
-  // Brief pause before vocab context
-  await new Promise((r) => setTimeout(r, 400));
-
-  // Play vocabulary context in octave 4
-  const vocabNotes = getVocabInChromaticOrder();
-  for (let i = 0; i < vocabNotes.length; i++) {
-    const btn = vocabButtons[i];
-    btn?.classList.add("playing");
-    await playNote(`${vocabNotes[i]}4`, { duration: INTRO_NOTE_DURATION });
-    await new Promise((r) => setTimeout(r, INTRO_NOTE_GAP));
-    btn?.classList.remove("playing");
-  }
-
-  isPlaying = false;
-}
-
-/** Render the octave introduction UI */
-function renderOctaveIntroduction(): void {
-  if (!octaveIntroState) return;
-
-  const app = document.getElementById("app")!;
-  const { note, newOctave, unlockedOctaves } = octaveIntroState;
-
-  app.innerHTML = `
-    <h1>Tone Quiz</h1>
-
-    <div class="exercise-container">
-      <div class="introduction-title">
-        <h2>Introducing ${note} in Octave ${newOctave}</h2>
-        <p>Click any button to hear that note.</p>
-      </div>
-
-      <div class="intro-section">
-        <h3>${note} in your unlocked octaves</h3>
-        <div class="intro-buttons" id="octave-intro-buttons"></div>
-      </div>
-
-      <div class="intro-section">
-        <h3>Vocabulary context (Octave 4)</h3>
-        <div class="intro-buttons" id="octave-vocab-buttons"></div>
-      </div>
-
-      <div class="controls">
-        <button class="play-again-btn" id="replay-octave-intro-btn">Replay All</button>
-        <button class="check-button" id="continue-octave-btn">Continue to Quiz</button>
-      </div>
-    </div>
-  `;
-
-  // Set up octave buttons
-  const octaveContainer = document.getElementById("octave-intro-buttons")!;
-  for (const octave of unlockedOctaves) {
-    const btn = document.createElement("button");
-    btn.className = "intro-note-btn";
-    if (octave === newOctave) {
-      btn.classList.add("intro-note-highlighted");
-    }
-    btn.textContent = `${note}${octave}`;
-    btn.addEventListener("click", () => {
-      playNote(`${note}${octave}`, { duration: INTRO_NOTE_DURATION });
-    });
-    octaveContainer.appendChild(btn);
-  }
-
-  // Set up vocab context buttons
-  const vocabContainer = document.getElementById("octave-vocab-buttons")!;
-  const vocabNotes = getVocabInChromaticOrder();
-  for (const vocabNote of vocabNotes) {
-    const btn = document.createElement("button");
-    btn.className = "intro-note-btn";
-    if (vocabNote === note) {
-      btn.classList.add("intro-note-highlighted");
-    }
-    btn.textContent = vocabNote;
-    btn.addEventListener("click", () => {
-      playNote(`${vocabNote}4`, { duration: INTRO_NOTE_DURATION });
-    });
-    vocabContainer.appendChild(btn);
-  }
-
-  setupOctaveIntroEventListeners();
-}
-
-/** Setup event listeners for octave introduction mode */
-function setupOctaveIntroEventListeners(): void {
-  const continueBtn = document.getElementById("continue-octave-btn");
-  if (continueBtn) {
-    continueBtn.addEventListener("click", finishOctaveIntroduction);
-  }
-
-  const replayBtn = document.getElementById("replay-octave-intro-btn");
-  if (replayBtn) {
-    replayBtn.addEventListener("click", replayOctaveIntroSequence);
-  }
-
-  // Add keyboard handler for octave introduction mode
-  if (keyboardHandler) {
-    document.removeEventListener("keydown", keyboardHandler);
-  }
-
-  keyboardHandler = (e: KeyboardEvent) => {
-    if (e.key === "r" || e.key === "R") {
-      e.preventDefault();
-      replayOctaveIntroSequence();
-    } else if (e.key === " " || e.key === "Enter") {
-      e.preventDefault();
-      if (!isPlaying) {
-        finishOctaveIntroduction();
-      }
-    }
-  };
-
-  document.addEventListener("keydown", keyboardHandler);
-}
-
-/** Replay the octave introduction sequence */
-async function replayOctaveIntroSequence(): Promise<void> {
-  if (!octaveIntroState || isPlaying) return;
-  await playOctaveIntroductionSequence();
-}
-
-/** Finish octave introduction and return to normal quiz */
-function finishOctaveIntroduction(): void {
-  octaveIntroState = null;
-  const { introducedNote } = initQuestion();
-
-  // If a new note was introduced, start note introduction
-  if (introducedNote) {
-    startIntroduction(introducedNote);
-    return;
-  }
-
   render();
   playQuestionNotes();
 }
@@ -1076,13 +878,7 @@ function retryQuestion(): void {
 
 function nextQuestion(): void {
   clearAutoAdvance();
-  const { isNewTarget, introducedNote, octaveIntro } = initQuestion();
-
-  // If a note is ready for octave introduction, start octave intro mode
-  if (octaveIntro) {
-    startOctaveIntroduction(octaveIntro.note, octaveIntro.octave);
-    return;
-  }
+  const { isNewTarget, introducedNote } = initQuestion();
 
   // If a new note was introduced, start introduction mode
   if (introducedNote) {
@@ -1159,13 +955,7 @@ export function renderToneQuizAbout(): void {
 
 export function renderToneQuiz(): void {
   persistentState = loadState();
-  const { introducedNote, octaveIntro } = initQuestion();
-
-  // If a note is ready for octave introduction, start octave intro mode
-  if (octaveIntro) {
-    startOctaveIntroduction(octaveIntro.note, octaveIntro.octave);
-    return;
-  }
+  const { introducedNote } = initQuestion();
 
   // If a new note was introduced on first load (shouldn't happen normally),
   // start introduction mode
