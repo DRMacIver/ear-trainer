@@ -852,10 +852,7 @@ function renderChoiceButtons(): void {
 function handleClearHistory(): void {
   if (confirm("Clear all history? This cannot be undone.")) {
     clearState();
-    persistentState = loadState();
-    initQuestion();
-    render();
-    playQuestionNotes();
+    window.location.hash = "#/";
   }
 }
 
