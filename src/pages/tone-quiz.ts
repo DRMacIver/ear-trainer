@@ -419,7 +419,7 @@ function renderIntroduction(): void {
   const note = introState.introducedNote;
 
   app.innerHTML = `
-    <a href="#/" class="back-link">&larr; Back to exercises</a>
+    <a href="#/" class="back-link">&larr; Back</a>
     <h1>Tone Quiz</h1>
 
     <div class="exercise-container">
@@ -594,7 +594,7 @@ function renderOctaveIntroduction(): void {
   const { note, newOctave, unlockedOctaves } = octaveIntroState;
 
   app.innerHTML = `
-    <a href="#/" class="back-link">&larr; Back to exercises</a>
+    <a href="#/" class="back-link">&larr; Back</a>
     <h1>Tone Quiz</h1>
 
     <div class="exercise-container">
@@ -727,7 +727,7 @@ function render(): void {
     : `Which was the ${question.targetNote}?`;
 
   app.innerHTML = `
-    <a href="#/" class="back-link">&larr; Back to exercises</a>
+    <a href="#/" class="back-link">&larr; Back</a>
     <h1>Tone Quiz</h1>
     <p>${description}</p>
     <p class="keyboard-hints"><strong>Keys:</strong> ${keyHints}</p>
@@ -754,7 +754,8 @@ function render(): void {
       <div class="learning-info">
         <span class="stats-label">Learning:</span>
         <span>${vocabDisplay}</span>
-        <a href="#/exercises/tone-quiz/stats" class="stats-link">View Stats</a>
+        <a href="#/stats" class="stats-link">View Stats</a>
+        <a href="#/about" class="stats-link">About</a>
       </div>
 
       <div class="danger-zone">
@@ -1060,6 +1061,65 @@ function nextQuestion(): void {
     flashScreen();
   }
   playQuestionNotes();
+}
+
+function renderIntroPage(showBackLink: boolean): void {
+  const app = document.getElementById("app")!;
+
+  const backLink = showBackLink
+    ? `<a href="#/quiz" class="back-link">&larr; Back to Quiz</a>`
+    : "";
+
+  const buttonText = showBackLink ? "Return to Quiz" : "Start Training";
+
+  app.innerHTML = `
+    ${backLink}
+    <h1>Ear Trainer</h1>
+    <p class="intro-subtitle">Perfect Pitch Training</p>
+
+    <div class="exercise-container intro-container">
+      <div class="intro-section">
+        <h2>How it works</h2>
+        <p>This exercise trains you to recognize musical notes by ear. You'll progress through increasingly difficult challenges:</p>
+
+        <ol class="intro-steps">
+          <li><strong>Two-note comparison:</strong> Two notes play - identify which one was the target note (e.g., "Which was the C?").</li>
+          <li><strong>Single-note identification:</strong> Once you're reliable at comparing notes, you'll hear just one note and identify it directly.</li>
+          <li><strong>Expanding vocabulary:</strong> You start with C and G. As you master each pair, new notes are introduced.</li>
+          <li><strong>Multiple octaves:</strong> After mastering a note in one octave, you'll learn to recognize it in higher and lower octaves too.</li>
+        </ol>
+      </div>
+
+      <div class="intro-section">
+        <h2>Tips</h2>
+        <ul class="intro-tips">
+          <li>Use headphones for best results</li>
+          <li>The exercise adapts to your skill level automatically</li>
+          <li>Your progress is saved in your browser</li>
+          <li>Keyboard shortcuts: <kbd>1</kbd>/<kbd>←</kbd> first option, <kbd>2</kbd>/<kbd>→</kbd> second option, <kbd>R</kbd> replay</li>
+        </ul>
+      </div>
+
+      <div class="controls">
+        <a href="#/quiz" class="check-button start-button">${buttonText}</a>
+      </div>
+    </div>
+  `;
+}
+
+export function renderToneQuizIntro(): void {
+  // If user has history, go directly to the quiz
+  const state = loadState();
+  if (state.history.length > 0) {
+    window.location.hash = "#/quiz";
+    return;
+  }
+
+  renderIntroPage(false);
+}
+
+export function renderToneQuizAbout(): void {
+  renderIntroPage(true);
 }
 
 export function renderToneQuiz(): void {

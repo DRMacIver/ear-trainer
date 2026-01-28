@@ -107,7 +107,7 @@ export function renderToneQuizStats(): void {
 
   if (targetNotes.length === 0) {
     app.innerHTML = `
-      <a href="#/exercises/tone-quiz" class="back-link">&larr; Back to Tone Quiz</a>
+      <a href="#/quiz" class="back-link">&larr; Back to Tone Quiz</a>
       <h1>Tone Quiz Stats</h1>
       <div class="exercise-container">
         <p>No data yet. Complete some questions in the Tone Quiz first!</p>
@@ -164,7 +164,7 @@ export function renderToneQuizStats(): void {
   `;
 
   app.innerHTML = `
-    <a href="#/exercises/tone-quiz" class="back-link">&larr; Back to Tone Quiz</a>
+    <a href="#/quiz" class="back-link">&larr; Back to Tone Quiz</a>
     <h1>Tone Quiz Stats</h1>
     <p>Performance matrix: rows are target notes (what you're asked to identify), columns are the other notes played with them. Click any cell to hear the pair.</p>
 

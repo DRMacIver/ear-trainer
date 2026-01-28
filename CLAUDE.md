@@ -4,17 +4,18 @@ An experiment in developing ear training exercises for developing perfect pitch.
 
 ## Project Overview
 
-The app presents various exercises focused on identifying musical notes. The initial exercises are variations on naming a particular note in increasingly difficult contexts.
+The app presents a progressive ear training exercise focused on identifying musical notes. Users learn to recognize notes through increasingly difficult challenges.
 
-### Pages
+### Exercise: Tone Quiz
 
-- **Note Playground**: Explore notes and learn about musical notation (sharps, flats, octaves, frequencies).
+The main (and only) exercise with adaptive learning:
 
-### Current Exercises
+1. **Two-note comparison**: Two notes play - identify which one was the target note (e.g., "Which was the C?")
+2. **Single-note identification**: Once reliable at comparing, hear just one note and identify it directly
+3. **Expanding vocabulary**: Start with C and G, master each pair to unlock new notes
+4. **Multiple octaves**: After mastering a note in octave 4, learn to recognize it in octaves 3 and 5
 
-- **Note Choice**: Plays a single note and asks you to identify which of two options it is. Good for beginners. Keyboard controls: Left/Right arrows.
-- **Progressive Note ID**: Adaptive difficulty training. Starts with 2 notes (C4 + one distant), adds more as you improve. 10 correct in a row increases difficulty (up to 10 notes). 50% wrong in last 10 decreases difficulty. Keyboard controls: number keys 1-9, 0 for 10.
-- **Note Matching**: Plays a set of notes, tells you what they are, and asks you to match note names to sounds by dragging them. You check your answers and must reorder incorrect ones until all are correct.
+Keyboard controls: `1`/`←` first option, `2`/`→` second option, `R` replay, `Space` continue
 
 ## Architecture
 
@@ -23,24 +24,31 @@ src/
   main.ts              # Entry point, hash-based routing
   audio.ts             # Web Audio API utilities for pure tones
   styles.css           # Global styles
+  lib/
+    tone-quiz-state.ts # State management and learning algorithms
+    fsrs.ts            # Spaced repetition implementation
   pages/
-    index.ts           # Exercise index page
-    playground.ts      # Note playground with notation guide
-    note-choice.ts     # Two-option note identification
-    progressive-id.ts  # Adaptive difficulty note identification
-    note-matching.ts   # Drag-and-drop note matching
+    tone-quiz.ts       # Main exercise UI
+    tone-quiz-stats.ts # Performance statistics view
 ```
+
+### Routes
+
+- `#/` - Intro page (redirects to quiz if user has history)
+- `#/quiz` - Main exercise
+- `#/stats` - Performance matrix
+- `#/about` - About/intro page (always accessible)
 
 ### Key Patterns
 
-- **Routing**: Simple hash-based routing (`#/exercises/note-matching`)
+- **Routing**: Simple hash-based routing
 - **Audio**: Pure tones generated via Web Audio API oscillators (sine waves)
-- **State**: Exercise state is managed within each exercise module
+- **State**: Exercise state persisted in localStorage with FSRS spaced repetition
 - **No frameworks**: Vanilla TypeScript with direct DOM manipulation
 
 ### Note Frequencies
 
-Notes use equal temperament tuning with A4 = 440 Hz. Supports three octaves (C3-B5) in the playground, exercises currently use octave 4 only.
+Notes use equal temperament tuning with A4 = 440 Hz. Exercises use octaves 3-5.
 
 ## Development
 

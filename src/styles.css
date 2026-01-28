@@ -1362,3 +1362,62 @@ kbd {
   border-color: #64b5f6;
   color: #000;
 }
+
+/* Intro/Welcome Page */
+.intro-subtitle {
+  color: #64b5f6;
+  font-size: 1.1rem;
+  margin-top: -1rem;
+  margin-bottom: 2rem;
+}
+
+.intro-container {
+  max-width: 600px;
+}
+
+.intro-steps {
+  padding-left: 1.25rem;
+  margin: 1rem 0;
+}
+
+.intro-steps li {
+  margin-bottom: 0.75rem;
+  line-height: 1.5;
+}
+
+.intro-tips {
+  margin: 0.5rem 0;
+  padding-left: 1.25rem;
+}
+
+.intro-tips li {
+  margin-bottom: 0.5rem;
+  color: #ccc;
+}
+
+.start-button {
+  display: inline-block;
+  padding: 1rem 2.5rem;
+  font-size: 1.2rem;
+  text-decoration: none;
+  margin-top: 1rem;
+}
+
+.start-button:hover {
+  background: #66bb6a;
+  color: #fff;
+}
+
+.introduction-title {
+  text-align: center;
+  margin-bottom: 1.5rem;
+}
+
+.introduction-title h2 {
+  margin-bottom: 0.5rem;
+}
+
+.introduction-title p {
+  color: #aaa;
+  font-size: 0.9rem;
+}

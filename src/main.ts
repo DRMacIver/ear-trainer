@@ -2,17 +2,17 @@
  * Main entry point - simple hash-based routing.
  */
 
-import { renderIndex } from "./pages/index.js";
-import { renderToneQuiz } from "./pages/tone-quiz.js";
+import { renderToneQuizIntro, renderToneQuiz, renderToneQuizAbout } from "./pages/tone-quiz.js";
 import { renderToneQuizStats } from "./pages/tone-quiz-stats.js";
 
 type Route = () => void | Promise<void>;
 
 const routes: Record<string, Route> = {
-  "": renderIndex,
-  "#/": renderIndex,
-  "#/exercises/tone-quiz": renderToneQuiz,
-  "#/exercises/tone-quiz/stats": renderToneQuizStats,
+  "": renderToneQuizIntro,
+  "#/": renderToneQuizIntro,
+  "#/quiz": renderToneQuiz,
+  "#/stats": renderToneQuizStats,
+  "#/about": renderToneQuizAbout,
 };
 
 function router(): void {
