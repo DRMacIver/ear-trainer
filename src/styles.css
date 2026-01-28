@@ -419,7 +419,9 @@ kbd {
 }
 
 .intro-container .intro-section {
+  margin-top: 0;
   margin-bottom: var(--space-md);
+  padding-top: 0;
 }
 
 .intro-container .intro-section h2 {
@@ -432,10 +434,11 @@ kbd {
 .intro-container .intro-section > p {
   font-size: 0.9375rem;
   line-height: 1.7;
+  margin-bottom: var(--space-md);
 }
 
 .intro-steps {
-  margin: var(--space-sm) 0 0 0;
+  margin: var(--space-md) 0 0 0;
   padding-left: var(--space-lg);
   list-style: none;
   counter-reset: steps;
@@ -443,7 +446,7 @@ kbd {
 
 .intro-steps li {
   position: relative;
-  margin-bottom: var(--space-sm);
+  margin-bottom: var(--space-md);
   padding-left: var(--space-sm);
   font-size: 0.9375rem;
   line-height: 1.5;
@@ -478,12 +481,12 @@ kbd {
 }
 
 .intro-tips {
-  margin: var(--space-sm) 0;
+  margin: var(--space-md) 0 0 0;
   padding-left: var(--space-lg);
 }
 
 .intro-tips li {
-  margin-bottom: var(--space-sm);
+  margin-bottom: var(--space-md);
   font-size: 0.9375rem;
   color: var(--text-secondary);
 }
