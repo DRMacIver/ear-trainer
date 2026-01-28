@@ -18,7 +18,6 @@ import {
   maybeStartNewSession,
   getRepeatProbability,
   selectMostUrgentPair,
-  selectSingleNotePair,
   getReadySingleNotePairs,
   ToneQuizState,
   FullTone,
@@ -61,9 +60,14 @@ let shouldRetry = false; // Whether next advance should retry same question
 let shouldRepeatSwapped = false; // Whether to repeat correct answer with swapped order
 let isPlaying = false; // Whether audio is currently playing
 
+// Single-note cycle queue: when non-empty, we're in a single-note cycle
+// Each entry is a note to ask about (paired with another note from ready pairs)
+let singleNoteQueue: FullTone[] = [];
+
 const AUTO_ADVANCE_DELAY = 750; // ms
 const RETRY_CHANCE = 1.0; // Always retry after wrong answer until correct
 const REPEAT_CORRECT_CHANCE = 0.3; // 30% chance to repeat after correct answer
+const MAX_SINGLE_NOTE_CYCLE = 6; // Cap single-note cycle at 6 notes
 
 /** Target note is always in octave 4 */
 function pickTargetOctave(): number {
@@ -104,8 +108,34 @@ function pickOtherOctave(target: FullTone, other: FullTone): number {
   return 4;
 }
 
-/** Probability of getting a single-note question when pairs are available */
-const SINGLE_NOTE_QUESTION_CHANCE = 0.3;
+/** Probability of starting a single-note cycle when pairs are available */
+const SINGLE_NOTE_CYCLE_CHANCE = 0.3;
+
+/** Shuffle array in place using Fisher-Yates */
+function shuffleArray<T>(array: T[]): void {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+}
+
+/** Start a single-note cycle by populating the queue with all notes from ready pairs */
+function startSingleNoteCycle(): void {
+  const readyPairs = getReadySingleNotePairs(persistentState);
+  if (readyPairs.length === 0) return;
+
+  // Get all unique notes from ready pairs
+  const uniqueNotes = new Set<FullTone>();
+  for (const [a, b] of readyPairs) {
+    uniqueNotes.add(a);
+    uniqueNotes.add(b);
+  }
+
+  // Convert to array, shuffle, and cap at MAX_SINGLE_NOTE_CYCLE
+  const notes = Array.from(uniqueNotes);
+  shuffleArray(notes);
+  singleNoteQueue = notes.slice(0, MAX_SINGLE_NOTE_CYCLE);
+}
 
 function initQuestion(): { isNewTarget: boolean; introducedNote: FullTone | null } {
   const now = Date.now();
@@ -113,9 +143,15 @@ function initQuestion(): { isNewTarget: boolean; introducedNote: FullTone | null
   // Maybe start new session (if inactive for more than 5 minutes)
   persistentState = maybeStartNewSession(persistentState, now);
 
-  // Check if we should do a single-note question
+  // If we're in a single-note cycle, continue with it
+  if (singleNoteQueue.length > 0) {
+    return initSingleNoteQuestion();
+  }
+
+  // Check if we should start a new single-note cycle
   const readyPairs = getReadySingleNotePairs(persistentState);
-  if (readyPairs.length > 0 && Math.random() < SINGLE_NOTE_QUESTION_CHANCE) {
+  if (readyPairs.length > 0 && Math.random() < SINGLE_NOTE_CYCLE_CHANCE) {
+    startSingleNoteCycle();
     return initSingleNoteQuestion();
   }
 
@@ -136,30 +172,44 @@ function initQuestion(): { isNewTarget: boolean; introducedNote: FullTone | null
   return initQuestionNormal();
 }
 
-/** Initialize a single-note question */
+/** Initialize a single-note question using the cycle queue */
 function initSingleNoteQuestion(): { isNewTarget: boolean; introducedNote: FullTone | null } {
-  const pair = selectSingleNotePair(persistentState);
-  if (!pair) {
-    // Fallback to normal question if no pairs available
+  // Pop the next note from the queue
+  const noteToPlay = singleNoteQueue.pop();
+
+  if (!noteToPlay) {
+    // Queue empty, fallback to normal question
     return initQuestionNormal();
   }
 
-  const { noteA: pairNote1, noteB: pairNote2 } = pair;
+  // Find a ready pair that includes this note
+  const readyPairs = getReadySingleNotePairs(persistentState);
+  const matchingPairs = readyPairs.filter(
+    ([a, b]) => a === noteToPlay || b === noteToPlay
+  );
 
-  // Randomly pick which note to play
-  const playNote = Math.random() < 0.5 ? pairNote1 : pairNote2;
-  const alternative = playNote === pairNote1 ? pairNote2 : pairNote1;
+  if (matchingPairs.length === 0) {
+    // No matching pair found, fallback to normal question
+    return initQuestionNormal();
+  }
+
+  // Pick a random matching pair
+  const [pairNote1, pairNote2] =
+    matchingPairs[Math.floor(Math.random() * matchingPairs.length)];
+
+  // The note we're playing is noteToPlay, the alternative is the other note in the pair
+  const alternative = pairNote1 === noteToPlay ? pairNote2 : pairNote1;
 
   const playedOctave = pickTargetOctave(); // Single notes always in octave 4
-  const playedWithOctave = `${playNote}${playedOctave}`;
+  const playedWithOctave = `${noteToPlay}${playedOctave}`;
 
   question = {
     questionType: "single-note",
     note1: playedWithOctave, // The note that will be played
     note2: "", // Not used for single-note
-    family1: playNote,
-    family2: playNote, // Same as family1 for single-note
-    targetNote: playNote, // The correct answer
+    family1: noteToPlay,
+    family2: noteToPlay, // Same as family1 for single-note
+    targetNote: noteToPlay, // The correct answer
     otherNote: alternative, // The wrong answer
     hasAnswered: false,
     wasCorrect: null,
