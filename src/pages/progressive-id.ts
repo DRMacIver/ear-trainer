@@ -55,6 +55,10 @@ interface ExerciseState {
   showingHistory: boolean;
   // Queue of note indices to ask (shuffled subset of noteIndices)
   noteQueue: number[];
+  // How many times we've asked the current note consecutively
+  consecutiveCount: number;
+  // Target repetitions before moving to next note in cycle
+  targetRepetitions: number;
 }
 
 let state: ExerciseState;
@@ -195,6 +199,8 @@ function initExercise(): void {
     history: [],
     showingHistory: false,
     noteQueue: [],
+    consecutiveCount: 0,
+    targetRepetitions: 0,
   };
 
   pickNextNote();
@@ -215,7 +221,7 @@ function shuffleArray<T>(array: T[]): void {
 /**
  * Refill the note queue with a shuffled selection of notes.
  * Uses all notes up to MAX_CYCLE_SIZE, ensuring each note is asked
- * once before any repeats.
+ * before any repeats.
  */
 function refillNoteQueue(): void {
   // Take up to MAX_CYCLE_SIZE notes (indices into noteIndices array)
@@ -225,14 +231,38 @@ function refillNoteQueue(): void {
   state.noteQueue = indices;
 }
 
+/**
+ * Pick how many times to ask the current note before moving on.
+ * - 2 notes: always 2 repetitions
+ * - 3+ notes: 2-3 repetitions
+ */
+function pickTargetRepetitions(): number {
+  if (state.noteIndices.length <= 2) {
+    return 2;
+  }
+  return Math.random() < 0.5 ? 2 : 3;
+}
+
 function pickNextNote(): void {
-  // Refill queue if empty
+  state.consecutiveCount++;
+
+  // Stay on the same note if we haven't hit our target repetitions
+  if (state.consecutiveCount < state.targetRepetitions) {
+    state.hasAnswered = false;
+    state.wasCorrect = null;
+    state.chosenIdx = null;
+    return;
+  }
+
+  // Time to move to next note in cycle - refill queue if empty
   if (state.noteQueue.length === 0) {
     refillNoteQueue();
   }
 
   // Pop the next note from the queue
   state.currentNoteIdx = state.noteQueue.pop()!;
+  state.consecutiveCount = 0;
+  state.targetRepetitions = pickTargetRepetitions();
   state.hasAnswered = false;
   state.wasCorrect = null;
   state.chosenIdx = null;
