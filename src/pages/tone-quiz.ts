@@ -200,10 +200,15 @@ function initTwoNoteQuestion(): boolean {
       availableNotes.add(a);
       availableNotes.add(b);
     }
-    const noteArray = Array.from(availableNotes);
+
+    // Filter out current note to ensure we pick a DIFFERENT one
+    let noteArray = Array.from(availableNotes);
+    if (currentStickyNote !== null && noteArray.length > 1) {
+      noteArray = noteArray.filter(n => n !== currentStickyNote);
+    }
     targetNote = noteArray[Math.floor(Math.random() * noteArray.length)];
 
-    // Check if this is actually a new target
+    // Always a new target when stickiness expires (unless only one note available)
     isNewTarget = currentStickyNote !== null && targetNote !== currentStickyNote;
 
     // Set stickiness for 3-6 questions
