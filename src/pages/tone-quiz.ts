@@ -452,7 +452,6 @@ function renderIntroduction(): void {
   const note = introState.introducedNote;
 
   app.innerHTML = `
-    <a href="#/" class="back-link">&larr; Back</a>
     <h1>Tone Quiz</h1>
 
     <div class="exercise-container">
@@ -631,7 +630,6 @@ function renderOctaveIntroduction(): void {
   const { note, newOctave, unlockedOctaves } = octaveIntroState;
 
   app.innerHTML = `
-    <a href="#/" class="back-link">&larr; Back</a>
     <h1>Tone Quiz</h1>
 
     <div class="exercise-container">
@@ -764,7 +762,6 @@ function render(): void {
     : `Which was the ${question.targetNote}?`;
 
   app.innerHTML = `
-    <a href="#/" class="back-link">&larr; Back</a>
     <h1>Tone Quiz</h1>
     <p>${description}</p>
     <p class="keyboard-hints"><strong>Keys:</strong> ${keyHints}</p>
