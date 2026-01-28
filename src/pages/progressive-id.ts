@@ -53,6 +53,10 @@ interface ExerciseState {
   history: HistoryEntry[];
   // Whether showing history view
   showingHistory: boolean;
+  // How many times we've asked the current note consecutively
+  consecutiveCount: number;
+  // Target repetitions before switching to a different note
+  targetRepetitions: number;
 }
 
 let state: ExerciseState;
@@ -192,21 +196,52 @@ function initExercise(): void {
     inputEnabled: false,
     history: [],
     showingHistory: false,
+    consecutiveCount: 0,
+    targetRepetitions: 0, // Set below after state exists
   };
+  state.targetRepetitions = pickTargetRepetitions();
 
   pickNextNote();
 }
 
+/**
+ * Pick target repetitions based on vocabulary size.
+ * - 2 notes: 1-2 repetitions (less sticky since there's less variety)
+ * - 3+ notes: 2-3 repetitions (stickier to reinforce each note)
+ */
+function pickTargetRepetitions(): number {
+  if (state.noteIndices.length <= 2) {
+    return Math.random() < 0.5 ? 1 : 2;
+  }
+  return Math.random() < 0.5 ? 2 : 3;
+}
+
 function pickNextNote(): void {
+  state.consecutiveCount++;
+
+  // Stay on the same note if we haven't hit our target repetitions
+  if (state.consecutiveCount < state.targetRepetitions) {
+    state.hasAnswered = false;
+    state.wasCorrect = null;
+    state.chosenIdx = null;
+    return;
+  }
+
+  // Time to switch notes
   const previousIdx = state.currentNoteIdx;
 
-  // Pick a random note, but re-roll once if it's the same as last time
+  // Pick a different note (avoid repeating the same note across sticky runs)
   let newIdx = Math.floor(Math.random() * state.noteIndices.length);
   if (newIdx === previousIdx && state.noteIndices.length > 1) {
-    newIdx = Math.floor(Math.random() * state.noteIndices.length);
+    // Keep re-rolling until we get a different note
+    while (newIdx === previousIdx) {
+      newIdx = Math.floor(Math.random() * state.noteIndices.length);
+    }
   }
 
   state.currentNoteIdx = newIdx;
+  state.consecutiveCount = 0;
+  state.targetRepetitions = pickTargetRepetitions();
   state.hasAnswered = false;
   state.wasCorrect = null;
   state.chosenIdx = null;
