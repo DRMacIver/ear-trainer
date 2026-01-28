@@ -96,14 +96,14 @@ function showNoteChangeModal(note: FullTone, onDismiss?: () => void): void {
   // Trigger entrance animation
   requestAnimationFrame(() => modal.classList.add("visible"));
 
-  // Remove after 2 seconds, then call callback
+  // Remove after 1.5 seconds, then call callback
   setTimeout(() => {
     modal.classList.remove("visible");
     setTimeout(() => {
       modal.remove();
       if (onDismiss) onDismiss();
     }, 300); // Wait for fade out
-  }, 2000);
+  }, 1500);
 }
 
 /** Initialize a new question. Returns true if target note changed (for flash). */
