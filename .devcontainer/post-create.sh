@@ -30,21 +30,6 @@ if command -v claude &> /dev/null; then
     fi
 fi
 
-# Update beads to latest (Claude Code auto-updates via native installer)
-sudo npm install -g @beads/bd || true
-
-# Configure beads
-if [ ! -d .beads ]; then
-    # New project - initialize beads
-    bd init || true
-else
-    # Cloned project - ensure beads is properly configured
-    # Fix repo fingerprint if needed (common after cloning)
-    if bd doctor 2>&1 | grep -q "Repo Fingerprint.*different repository"; then
-        echo "y" | bd migrate --update-repo-id || true
-    fi
-fi
-
 # Make all git hooks executable
 if [ -d .githooks ]; then
     chmod +x .githooks/* 2>/dev/null || true

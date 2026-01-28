@@ -20,17 +20,11 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
-import yaml
-
 # Magic string that allows stopping when human input is required
 HUMAN_INPUT_REQUIRED = (
     "I have completed all work that I can and require human input to proceed."
 )
 
-# Number of iterations without issue changes before stopping
-STALENESS_THRESHOLD = 5
-
-SESSION_FILE = Path(".claude/autonomous-session.local.md")
 BUILD_FAILING_MARKER = Path(".claude/build-already-failing.local")
 
 # Time window for considering user as "recently active"
@@ -72,15 +66,6 @@ CONTINUE_QUESTION_PATTERNS = [
     r"(?i)\bwant me to proceed\b",
     r"(?i)\bwant me to keep\b",
 ]
-
-
-def cleanup_session_file() -> None:
-    """Delete the session file on successful exit."""
-    try:
-        if SESSION_FILE.exists():
-            SESSION_FILE.unlink()
-    except OSError:
-        pass  # Ignore errors during cleanup
 
 
 def eprint(*args: object) -> None:
@@ -311,34 +296,6 @@ def check_interactive_question(transcript_path: str) -> tuple[bool, str | None]:
     return run_subagent_decision(assistant_output, transcript_path)
 
 
-def get_open_issues_count() -> int:
-    """Get the count of open beads issues."""
-    import json as json_module
-
-    exit_code, output = run_command(["bd", "list", "--status=open", "--format=json"])
-    if exit_code != 0:
-        return 0
-
-    try:
-        issues = json_module.loads(output)
-        if isinstance(issues, list):
-            return len(cast(list[Any], issues))
-    except (json_module.JSONDecodeError, TypeError):
-        pass
-
-    # Fallback: count lines from bd ready
-    exit_code, output = run_command(["bd", "ready"])
-    if exit_code == 0 and output.strip():
-        # Count lines that look like issue entries (start with number and bracket)
-        count = 0
-        for line in output.strip().split("\n"):
-            line = line.strip()
-            if line and line[0].isdigit() and "[" in line:
-                count += 1
-        return count
-    return 0
-
-
 def check_for_bypass(transcript_path: str) -> tuple[bool, str | None]:
     """Check if Claude's last output contains the bypass string.
 
@@ -353,10 +310,6 @@ def check_for_bypass(transcript_path: str) -> tuple[bool, str | None]:
         last_output = get_last_assistant_output(transcript_path)
 
         if HUMAN_INPUT_REQUIRED in last_output:
-            # Check if there are remaining issues
-            open_count = get_open_issues_count()
-            if open_count > 0:
-                return False, f"There are {open_count} open issue(s) remaining"
             return True, None
 
     except Exception:
@@ -371,75 +324,6 @@ def run_command(cmd: list[str]) -> tuple[int, str]:
         return result.returncode, (result.stdout or "") + (result.stderr or "")
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return 1, ""
-
-
-def parse_session_file() -> dict[str, Any] | None:
-    """Parse the autonomous session configuration file."""
-    if not SESSION_FILE.exists():
-        return None
-
-    content = SESSION_FILE.read_text()
-    if not content.startswith("---"):
-        return None
-
-    # Extract YAML frontmatter
-    parts = content.split("---", 2)
-    if len(parts) < 3:
-        return None
-
-    try:
-        result: object = yaml.safe_load(parts[1])
-        if isinstance(result, dict):
-            return cast(dict[str, Any], result)
-        return None
-    except Exception:
-        # Fallback to basic parsing
-        config: dict[str, Any] = {}
-        for line in parts[1].strip().split("\n"):
-            if ":" in line:
-                key, value_str = line.split(":", 1)
-                key = key.strip()
-                value_str = value_str.strip()
-                value: Any = int(value_str) if value_str.isdigit() else value_str
-                config[key] = value
-        return config
-
-
-def update_session_file(config: dict[str, Any]) -> None:
-    """Update the session file with new config."""
-    content = f"""---
-{yaml.dump(config, default_flow_style=False)}---
-
-# Autonomous Session Log
-
-This file tracks the autonomous development session.
-"""
-    SESSION_FILE.write_text(content)
-
-
-def get_issue_ids(output: str) -> set[str]:
-    """Extract issue IDs from bd output."""
-    ids: set[str] = set()
-    for line in output.splitlines():
-        # Look for issue ID patterns (e.g., "project-123")
-        parts = line.split()
-        for part in parts:
-            if "-" in part and any(c.isdigit() for c in part):
-                # Likely an issue ID
-                ids.add(part.split()[0] if " " in part else part)
-                break
-    return ids
-
-
-def get_current_issues() -> tuple[set[str], set[str]]:
-    """Get current open and in-progress issues."""
-    _, open_output = run_command(["bd", "list", "--status=open"])
-    _, in_progress_output = run_command(["bd", "list", "--status=in_progress"])
-
-    open_ids = get_issue_ids(open_output)
-    in_progress_ids = get_issue_ids(in_progress_output)
-
-    return open_ids, in_progress_ids
 
 
 def run_quality_check() -> tuple[bool, str]:
@@ -779,12 +663,11 @@ def main() -> int:
     except Exception:
         pass
 
-    # Fast path: if no autonomous session and no git changes, allow immediate exit
+    # Fast path: if no git changes, allow immediate exit
     # This must come before any subagent calls to avoid slowness
-    if not SESSION_FILE.exists():
-        has_changes, _ = check_uncommitted_changes()
-        if not has_changes:
-            return 0  # Nothing to check, allow immediate exit
+    has_changes_fast, _ = check_uncommitted_changes()
+    if not has_changes_fast:
+        return 0  # Nothing to check, allow immediate exit
 
     # Check for bypass string in Claude's last output
     bypass_allowed, rejection_reason = check_for_bypass(transcript_path)
@@ -799,7 +682,6 @@ def main() -> int:
         eprint(f"{rejection_reason}.")
         eprint()
         eprint("Please work on the remaining issues before exiting.")
-        eprint("Run `bd ready` to see available work.")
         eprint()
         return 2
 
@@ -881,12 +763,10 @@ def main() -> int:
         if todo_warnings:
             eprint("## Untracked Work Items")
             eprint()
-            eprint("Consider linking these items to beads issues:")
+            eprint("The following TODO/FIXME markers were found:")
             eprint()
             for w in todo_warnings:
                 eprint(w)
-            eprint()
-            eprint("Format: # ITEM(#project-abc): description".replace("ITEM", "TODO"))
             eprint()
 
         if large_file_warnings:
@@ -972,146 +852,33 @@ def main() -> int:
         eprint()
         # Don't return - continue with autonomous mode
 
-    # Check if autonomous mode is active
-    config = parse_session_file()
-    if config is None:
-        # Not in autonomous mode - run quality checks before allowing exit
-        # This ensures coverage and other quality gates pass
-        eprint("# Pre-exit Quality Check")
+    # Run quality checks before allowing exit
+    eprint("# Pre-exit Quality Check")
+    eprint()
+    passed, output = run_quality_check()
+    if not passed:
         eprint()
-        passed, output = run_quality_check()
-        if not passed:
-            eprint()
-            eprint("## Quality Gates Failed")
-            eprint()
-            eprint("Quality checks must pass before exiting.")
-            eprint()
-            if output.strip():
-                eprint("### Output:")
-                eprint()
-                # Show last 50 lines of output to avoid overwhelming
-                lines = output.strip().split("\n")
-                if len(lines) > 50:
-                    eprint(f"... (showing last 50 of {len(lines)} lines)")
-                    lines = lines[-50:]
-                for line in lines:
-                    eprint(f"  {line}")
-                eprint()
-            eprint("Fix the issues shown above before exiting.")
-            eprint()
-            return 2  # Block exit
+        eprint("## Quality Gates Failed")
         eprint()
-        eprint("Quality gates passed. Allowing exit.")
-        return 0
-
-    iteration: int = int(config.get("iteration", 0)) + 1
-    last_change_iteration: int = int(config.get("last_issue_change_iteration", 0))
-    snapshot_list: list[str] = config.get("issue_snapshot", [])
-    previous_snapshot: set[str] = set(snapshot_list)
-
-    # Get current issue state
-    open_ids, in_progress_ids = get_current_issues()
-    current_snapshot = open_ids | in_progress_ids
-    total_outstanding = len(current_snapshot)
-
-    # Check if issues changed
-    if current_snapshot != previous_snapshot:
-        last_change_iteration = iteration
-        eprint(f"Issue state changed at iteration {iteration}")
-
-    # Update session file
-    config["iteration"] = iteration
-    config["last_issue_change_iteration"] = last_change_iteration
-    config["issue_snapshot"] = list(current_snapshot)
-    update_session_file(config)
-
-    # Check staleness
-    iterations_since_change = iteration - last_change_iteration
-    if iterations_since_change >= STALENESS_THRESHOLD:
-        eprint("# Staleness Detected")
+        eprint("Quality checks must pass before exiting.")
         eprint()
-        eprint(f"No issue changes for {iterations_since_change} iterations.")
-        eprint("Autonomous mode is stopping due to lack of progress.")
+        if output.strip():
+            eprint("### Output:")
+            eprint()
+            # Show last 50 lines of output to avoid overwhelming
+            lines = output.strip().split("\n")
+            if len(lines) > 50:
+                eprint(f"... (showing last 50 of {len(lines)} lines)")
+                lines = lines[-50:]
+            for line in lines:
+                eprint(f"  {line}")
+            eprint()
+        eprint("Fix the issues shown above before exiting.")
         eprint()
-        eprint("This could mean:")
-        eprint("- The remaining work requires human decisions")
-        eprint("- There's a blocker that needs manual intervention")
-        eprint("- The loop is stuck in an unproductive pattern")
-        eprint()
-        eprint("Run `/autonomous-mode` to start a new session with fresh goals.")
-        cleanup_session_file()
-        return 0  # Allow exit
-
-    # Check if all work is done
-    if total_outstanding == 0:
-        eprint("# Checking Completion")
-        eprint()
-        eprint("No outstanding issues. Running quality gates...")
-        eprint()
-
-        passed, output = run_quality_check()
-        if passed:
-            eprint("All quality gates passed!")
-            eprint("No open issues remain.")
-            eprint()
-            eprint("## Options")
-            eprint()
-            eprint("1. Run `/ideate` to generate new work items")
-            eprint("2. Say the exit phrase to end the session")
-            eprint()
-            eprint("To exit, include this exact phrase in your response:")
-            eprint()
-            eprint(f'  "{HUMAN_INPUT_REQUIRED}"')
-            eprint()
-            return 2  # Block exit, require explicit choice
-        else:
-            eprint("## Quality Gates Failed")
-            if output.strip():
-                eprint("### Output:")
-                lines = output.strip().split("\n")
-                if len(lines) > 50:
-                    eprint(f"... (showing last 50 of {len(lines)} lines)")
-                    lines = lines[-50:]
-                for line in lines:
-                    eprint(f"  {line}")
-            eprint()
-            eprint("Fix issues before completing.")
-            return 2  # Block exit
-
-    # Work remains
-    eprint("# Autonomous Mode Active")
+        return 2  # Block exit
     eprint()
-    eprint(f"**Iteration {iteration}** | Outstanding issues: {total_outstanding}")
-    eprint(f"Iterations since last issue change: {iterations_since_change}")
-    eprint()
-    eprint("## Current State")
-    eprint(f"- Open issues: {len(open_ids)}")
-    eprint(f"- In progress: {len(in_progress_ids)}")
-    eprint()
-    eprint("## Action Required")
-    eprint()
-    eprint("Continue working on outstanding issues:")
-    eprint()
-    eprint("1. Run `bd ready` to see available work")
-    eprint("2. Pick an issue and work on it")
-    eprint("3. Run quality checks after completing work")
-    eprint("4. For substantial work, run `/goal-verify`")
-    eprint("5. Close completed issues with `bd close <id>`")
-    eprint()
-
-    if iterations_since_change > 2:
-        eprint(f"**Warning**: No issue changes for {iterations_since_change} loops.")
-        eprint(f"Staleness threshold: {STALENESS_THRESHOLD}")
-        eprint()
-
-    eprint("---")
-    eprint()
-    eprint("If you cannot proceed without human input, include this exact string:")
-    eprint()
-    eprint(f'  "{HUMAN_INPUT_REQUIRED}"')
-    eprint()
-
-    return 2  # Block exit
+    eprint("Quality gates passed. Allowing exit.")
+    return 0
 
 
 if __name__ == "__main__":

@@ -10,16 +10,6 @@
         ]
       }
     ],
-    "PreCompact": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/scripts/run-py.sh \"$CLAUDE_PROJECT_DIR\"/.claude/scripts/precompact-beads-hook.py"
-          }
-        ]
-      }
-    ],
     "Stop": [
       {
         "hooks": [
@@ -43,7 +33,6 @@
     ]
   },
   "enabledPlugins": {
-    "claude-reliability@claude-reliability-marketplace": true,
-    "beads@beads-marketplace": true
+    "claude-reliability@claude-reliability-marketplace": true
   }
 }
