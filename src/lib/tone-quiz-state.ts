@@ -45,8 +45,8 @@ export const UNLOCK_COOLDOWN = 20;
 // Variant-Based Progression System Constants
 // ============================================================================
 
-/** Correct in a row to complete a variant and unlock next */
-export const VARIANT_COMPLETION_STREAK = 5;
+/** Correct in a row PER PAIR (across any octave) to unlock next variant */
+export const PAIR_COMPLETION_STREAK = 4;
 /** Look at last N single-note questions for new note unlock */
 export const NOTE_UNLOCK_WINDOW = 20;
 /** Need this many correct out of NOTE_UNLOCK_WINDOW (90%) */
@@ -115,7 +115,7 @@ export interface ToneQuizState {
 
   // Variant-based progression system
   unlockedVariants: string[]; // Variant keys that are unlocked ["C-G:two-note:4-4", ...]
-  variantStreaks: Record<string, number>; // variant key -> current streak for completion
+  pairStreaks: Record<string, number>; // pair (e.g., "C-G") -> current streak for unlock (across any octave)
   recentSingleNoteResults: boolean[]; // Last NOTE_UNLOCK_WINDOW results across all single-note questions
 
   // Pending note unlocks (only for new notes, not variant unlocks)
@@ -140,7 +140,7 @@ function createInitialState(): ToneQuizState {
     isFirstOnTarget: true,
     // Variant-based progression: start with only C-G:two-note:4-4 unlocked
     unlockedVariants: ["C-G:two-note:4-4"],
-    variantStreaks: {},
+    pairStreaks: {},
     recentSingleNoteResults: [],
     pendingUnlocks: [],
     questionsSinceLastUnlock: 0,
@@ -425,7 +425,8 @@ export function getNextVariantToUnlock(
 }
 
 /**
- * Record a result for a variant, update streak, and possibly unlock next variant.
+ * Record a result for a variant, update pair streak, and possibly unlock next variant.
+ * Streaks are tracked per PAIR (across any octave combination), not per variant.
  * Returns updated state.
  */
 export function recordVariantResult(
@@ -433,27 +434,27 @@ export function recordVariantResult(
   variantKey: string,
   correct: boolean
 ): ToneQuizState {
+  const { pair } = parseVariantKey(variantKey);
   let newState = { ...state };
 
   if (correct) {
-    // Increment streak
-    const currentStreak = state.variantStreaks[variantKey] ?? 0;
+    // Increment pair streak (across any octave combination)
+    const currentStreak = state.pairStreaks[pair] ?? 0;
     const newStreak = currentStreak + 1;
-    newState.variantStreaks = { ...state.variantStreaks, [variantKey]: newStreak };
+    newState.pairStreaks = { ...state.pairStreaks, [pair]: newStreak };
 
-    // Check for completion (5 in a row)
-    if (newStreak >= VARIANT_COMPLETION_STREAK) {
-      const { pair } = parseVariantKey(variantKey);
+    // Check for completion (4 in a row for the pair)
+    if (newStreak >= PAIR_COMPLETION_STREAK) {
       const nextVariant = getNextVariantToUnlock(newState, pair);
       if (nextVariant && !isVariantUnlocked(newState, nextVariant)) {
         newState.unlockedVariants = [...newState.unlockedVariants, nextVariant];
-        // Reset streak for this variant so it doesn't keep triggering
-        newState.variantStreaks = { ...newState.variantStreaks, [variantKey]: 0 };
+        // Reset pair streak so it doesn't keep triggering
+        newState.pairStreaks = { ...newState.pairStreaks, [pair]: 0 };
       }
     }
   } else {
-    // Reset streak on wrong answer
-    newState.variantStreaks = { ...state.variantStreaks, [variantKey]: 0 };
+    // Reset pair streak on wrong answer
+    newState.pairStreaks = { ...state.pairStreaks, [pair]: 0 };
   }
 
   return newState;

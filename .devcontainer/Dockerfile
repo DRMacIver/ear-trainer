@@ -35,11 +35,10 @@ RUN locale-gen en_US.UTF-8
 ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 
-# Install Node.js LTS (needed for beads)
+# Install Node.js LTS
 RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
     && apt-get install -y nodejs \
-    && rm -rf /var/lib/apt/lists/* \
-    && npm install -g @beads/bd
+    && rm -rf /var/lib/apt/lists/*
 
 # Install just (command runner) - bundled script to avoid 403 errors from just.systems
 COPY .devcontainer/scripts/install-just.sh /tmp/install-just.sh

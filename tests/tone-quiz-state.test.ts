@@ -55,7 +55,7 @@ import {
   AVAILABLE_OCTAVES,
   MASTERY_WINDOW,
   UNLOCK_COOLDOWN,
-  VARIANT_COMPLETION_STREAK,
+  PAIR_COMPLETION_STREAK,
   NOTE_UNLOCK_COOLDOWN,
   Grade,
   FullTone,
@@ -117,7 +117,7 @@ describe("loadState / saveState / clearState", () => {
     expect(state.correctStreak).toBe(0);
     // New variant system fields
     expect(state.unlockedVariants).toEqual(["C-G:two-note:4-4"]);
-    expect(state.variantStreaks).toEqual({});
+    expect(state.pairStreaks).toEqual({});
     expect(state.recentSingleNoteResults).toEqual([]);
   });
 
@@ -1569,31 +1569,45 @@ describe("recordVariantResult", () => {
     localStorageMock.clear();
   });
 
-  it("increments streak on correct answer", () => {
+  it("increments pair streak on correct answer", () => {
     let state = loadState();
     state = recordVariantResult(state, "C-G:two-note:4-4", true);
-    expect(state.variantStreaks["C-G:two-note:4-4"]).toBe(1);
+    expect(state.pairStreaks["C-G"]).toBe(1);
     state = recordVariantResult(state, "C-G:two-note:4-4", true);
-    expect(state.variantStreaks["C-G:two-note:4-4"]).toBe(2);
+    expect(state.pairStreaks["C-G"]).toBe(2);
   });
 
-  it("resets streak on wrong answer", () => {
+  it("tracks streak per pair, not per variant (different octaves count together)", () => {
     let state = loadState();
-    state.variantStreaks = { "C-G:two-note:4-4": 3 };
+    // Start with both variants unlocked for testing
+    state.unlockedVariants = ["C-G:two-note:4-4", "C-G:two-note:3-3"];
+
+    // Get correct on different octave variants - should all count towards same pair streak
+    state = recordVariantResult(state, "C-G:two-note:4-4", true);
+    expect(state.pairStreaks["C-G"]).toBe(1);
+    state = recordVariantResult(state, "C-G:two-note:3-3", true);
+    expect(state.pairStreaks["C-G"]).toBe(2);
+    state = recordVariantResult(state, "C-G:two-note:4-4", true);
+    expect(state.pairStreaks["C-G"]).toBe(3);
+  });
+
+  it("resets pair streak on wrong answer", () => {
+    let state = loadState();
+    state.pairStreaks = { "C-G": 3 };
     state = recordVariantResult(state, "C-G:two-note:4-4", false);
-    expect(state.variantStreaks["C-G:two-note:4-4"]).toBe(0);
+    expect(state.pairStreaks["C-G"]).toBe(0);
   });
 
-  it("unlocks next variant after VARIANT_COMPLETION_STREAK correct", () => {
+  it("unlocks next variant after PAIR_COMPLETION_STREAK correct", () => {
     let state = loadState();
-    // Get 5 correct in a row
-    for (let i = 0; i < VARIANT_COMPLETION_STREAK; i++) {
+    // Get 4 correct in a row (can be any octave combo)
+    for (let i = 0; i < PAIR_COMPLETION_STREAK; i++) {
       state = recordVariantResult(state, "C-G:two-note:4-4", true);
     }
     // Should have unlocked the next variant (3-3)
     expect(state.unlockedVariants).toContain("C-G:two-note:3-3");
-    // Streak should be reset to prevent continuous triggering
-    expect(state.variantStreaks["C-G:two-note:4-4"]).toBe(0);
+    // Pair streak should be reset to prevent continuous triggering
+    expect(state.pairStreaks["C-G"]).toBe(0);
   });
 });
 
@@ -1668,7 +1682,7 @@ describe("recordQuestion with variant tracking", () => {
     expect(state.recentSingleNoteResults).toEqual([true]);
   });
 
-  it("updates variant streak when variantKey provided", () => {
+  it("updates pair streak when variantKey provided", () => {
     let state = loadState();
     state = recordQuestion(state, {
       timestamp: Date.now(),
@@ -1681,10 +1695,10 @@ describe("recordQuestion with variant tracking", () => {
       wasFirstInStreak: true,
       variantKey: "C-G:two-note:4-4",
     });
-    expect(state.variantStreaks["C-G:two-note:4-4"]).toBe(1);
+    expect(state.pairStreaks["C-G"]).toBe(1);
   });
 
-  it("does not update variant streak for retry (wasFirstInStreak=false)", () => {
+  it("does not update pair streak for retry (wasFirstInStreak=false)", () => {
     let state = loadState();
     state = recordQuestion(state, {
       timestamp: Date.now(),
@@ -1697,6 +1711,6 @@ describe("recordQuestion with variant tracking", () => {
       wasFirstInStreak: false,
       variantKey: "C-G:two-note:4-4",
     });
-    expect(state.variantStreaks["C-G:two-note:4-4"]).toBeUndefined();
+    expect(state.pairStreaks["C-G"]).toBeUndefined();
   });
 });

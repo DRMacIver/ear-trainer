@@ -70,11 +70,26 @@ let isPlaying = false; // Whether audio is currently playing
 // Track the last question type for stickiness
 let lastQuestionType: QuestionType | null = null;
 
+// Note stickiness for two-tone questions (stay on same target note for 3-6 questions)
+let currentStickyNote: FullTone | null = null;
+let questionsRemainingOnNote = 0;
+
 const AUTO_ADVANCE_DELAY = 750; // ms
 /** Probability of staying on the same question type (two-note vs single-note) */
 const TYPE_STICKINESS = 0.7;
+/** Min/max questions to stay on same target note for two-tone */
+const NOTE_STICKY_MIN = 3;
+const NOTE_STICKY_MAX = 6;
 
-function initQuestion(): void {
+/** Flash the screen to indicate a change */
+function flashScreen(): void {
+  const app = document.getElementById("app")!;
+  app.classList.add("flash");
+  setTimeout(() => app.classList.remove("flash"), 300);
+}
+
+/** Initialize a new question. Returns true if target note changed (for flash). */
+function initQuestion(): boolean {
   // Decide question type based on what's available and stickiness
   const twoToneVariants = getUnlockedTwoToneVariants(persistentState);
   const singleNoteVariants = getUnlockedSingleNoteVariants(persistentState);
@@ -99,8 +114,9 @@ function initQuestion(): void {
 
   if (questionType === "single-note") {
     initSingleNoteQuestion();
+    return false; // No flash for single-note
   } else {
-    initTwoNoteQuestion();
+    return initTwoNoteQuestion();
   }
 }
 
@@ -146,22 +162,57 @@ function initSingleNoteQuestion(): void {
 }
 
 /** Initialize a random two-note question from unlocked variants */
-function initTwoNoteQuestion(): void {
+function initTwoNoteQuestion(): boolean {
   const unlockedVariants = getUnlockedTwoToneVariants(persistentState);
   if (unlockedVariants.length === 0) {
     throw new Error("No unlocked two-tone variants");
   }
 
-  // Pick a random variant
+  // Determine the target note (with stickiness)
+  let targetNote: FullTone;
+  let isNewTarget = false;
+
+  if (questionsRemainingOnNote > 0 && currentStickyNote !== null) {
+    // Stay on current note
+    targetNote = currentStickyNote;
+    questionsRemainingOnNote--;
+  } else {
+    // Pick a new target note from all notes in unlocked variants
+    const availableNotes = new Set<FullTone>();
+    for (const variant of unlockedVariants) {
+      const { pair } = parseVariantKey(variant);
+      const [a, b] = pair.split("-") as [FullTone, FullTone];
+      availableNotes.add(a);
+      availableNotes.add(b);
+    }
+    const noteArray = Array.from(availableNotes);
+    targetNote = noteArray[Math.floor(Math.random() * noteArray.length)];
+
+    // Check if this is actually a new target
+    isNewTarget = currentStickyNote !== null && targetNote !== currentStickyNote;
+
+    // Set stickiness for 3-6 questions
+    currentStickyNote = targetNote;
+    questionsRemainingOnNote =
+      NOTE_STICKY_MIN + Math.floor(Math.random() * (NOTE_STICKY_MAX - NOTE_STICKY_MIN + 1)) - 1;
+  }
+
+  // Find variants that include the target note
+  const matchingVariants = unlockedVariants.filter((v) => {
+    const { pair } = parseVariantKey(v);
+    const [a, b] = pair.split("-") as [FullTone, FullTone];
+    return a === targetNote || b === targetNote;
+  });
+
+  // Pick a random matching variant
   const selectedVariant =
-    unlockedVariants[Math.floor(Math.random() * unlockedVariants.length)];
+    matchingVariants[Math.floor(Math.random() * matchingVariants.length)];
   const { pair, octaves } = parseVariantKey(selectedVariant);
   const [octave1, octave2] = octaves as [number, number];
   const [pairNote1, pairNote2] = pair.split("-") as [FullTone, FullTone];
 
-  // Randomly pick which note is the target
-  const [targetNote, otherNote] =
-    Math.random() < 0.5 ? [pairNote1, pairNote2] : [pairNote2, pairNote1];
+  // The other note is the one that's not the target
+  const otherNote = pairNote1 === targetNote ? pairNote2 : pairNote1;
 
   // Octaves match the pair order (pairNote1 gets octave1, pairNote2 gets octave2)
   const targetOctave = targetNote === pairNote1 ? octave1 : octave2;
@@ -190,6 +241,8 @@ function initTwoNoteQuestion(): void {
     displayOrder: [targetNote, otherNote],
     variantKey: selectedVariant,
   };
+
+  return isNewTarget;
 }
 
 async function playQuestionNotes(): Promise<void> {
@@ -721,8 +774,11 @@ function nextQuestion(): void {
     return;
   }
 
-  initQuestion();
+  const isNewTarget = initQuestion();
   render();
+  if (isNewTarget) {
+    flashScreen();
+  }
   playQuestionNotes();
 }
 
