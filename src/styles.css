@@ -711,20 +711,49 @@ kbd {
 }
 
 /* ============================================================================
-   Flash Animation
+   Note Change Modal
    ============================================================================ */
 
-#app.flash {
-  animation: flash-animation 0.3s ease-out;
+.note-change-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
 }
 
-@keyframes flash-animation {
-  0% {
-    background-color: var(--accent-light);
-  }
-  100% {
-    background-color: transparent;
-  }
+.note-change-modal.visible {
+  opacity: 1;
+}
+
+.note-change-content {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  padding: var(--space-xl) var(--space-2xl);
+  border-radius: var(--radius-lg);
+  font-size: 1.75rem;
+  font-weight: 500;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  transform: scale(0.9);
+  transition: transform 0.3s ease;
+}
+
+.note-change-modal.visible .note-change-content {
+  transform: scale(1);
+}
+
+.note-change-content strong {
+  color: var(--accent);
+  font-size: 2.25rem;
+  font-weight: 700;
 }
 
 /* ============================================================================

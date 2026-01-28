@@ -81,11 +81,26 @@ const TYPE_STICKINESS = 0.7;
 const NOTE_STICKY_MIN = 3;
 const NOTE_STICKY_MAX = 6;
 
-/** Flash the screen to indicate a change */
-function flashScreen(): void {
-  const app = document.getElementById("app")!;
-  app.classList.add("flash");
-  setTimeout(() => app.classList.remove("flash"), 300);
+/** Show a temporary modal overlay indicating the note has changed */
+function showNoteChangeModal(note: FullTone): void {
+  // Remove any existing modal
+  const existing = document.getElementById("note-change-modal");
+  if (existing) existing.remove();
+
+  const modal = document.createElement("div");
+  modal.id = "note-change-modal";
+  modal.className = "note-change-modal";
+  modal.innerHTML = `<div class="note-change-content">Note change: <strong>${note}</strong></div>`;
+  document.body.appendChild(modal);
+
+  // Trigger entrance animation
+  requestAnimationFrame(() => modal.classList.add("visible"));
+
+  // Remove after 1 second
+  setTimeout(() => {
+    modal.classList.remove("visible");
+    setTimeout(() => modal.remove(), 300); // Wait for fade out
+  }, 1000);
 }
 
 /** Initialize a new question. Returns true if target note changed (for flash). */
@@ -777,7 +792,7 @@ function nextQuestion(): void {
   const isNewTarget = initQuestion();
   render();
   if (isNewTarget) {
-    flashScreen();
+    showNoteChangeModal(question.targetNote);
   }
   playQuestionNotes();
 }
