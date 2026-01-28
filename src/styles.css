@@ -723,35 +723,36 @@ kbd {
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: rgba(0, 0, 0, 0.5);
+  background-color: rgba(0, 0, 0, 0);
   z-index: 1000;
-  opacity: 0;
-  transition: opacity 0.3s ease;
   pointer-events: none;
+  transition: background-color 0.3s ease;
 }
 
 .note-change-modal.visible {
-  opacity: 1;
+  background-color: rgba(0, 0, 0, 0.6);
 }
 
 .note-change-content {
-  background: var(--bg-elevated);
-  color: var(--text-primary);
+  background: #1a1a2e;
+  color: #ffffff;
   padding: var(--space-xl) var(--space-2xl);
   border-radius: var(--radius-lg);
   font-size: 1.75rem;
   font-weight: 500;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
   transform: scale(0.9);
-  transition: transform 0.3s ease;
+  opacity: 0;
+  transition: transform 0.3s ease, opacity 0.3s ease;
 }
 
 .note-change-modal.visible .note-change-content {
   transform: scale(1);
+  opacity: 1;
 }
 
 .note-change-content strong {
-  color: var(--accent);
+  color: #4ecdc4;
   font-size: 2.25rem;
   font-weight: 700;
 }
