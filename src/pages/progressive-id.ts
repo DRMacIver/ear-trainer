@@ -53,10 +53,8 @@ interface ExerciseState {
   history: HistoryEntry[];
   // Whether showing history view
   showingHistory: boolean;
-  // How many times we've asked the current note consecutively
-  consecutiveCount: number;
-  // Target repetitions before switching to a different note
-  targetRepetitions: number;
+  // Queue of note indices to ask (shuffled subset of noteIndices)
+  noteQueue: number[];
 }
 
 let state: ExerciseState;
@@ -196,52 +194,45 @@ function initExercise(): void {
     inputEnabled: false,
     history: [],
     showingHistory: false,
-    consecutiveCount: 0,
-    targetRepetitions: 0, // Set below after state exists
+    noteQueue: [],
   };
-  state.targetRepetitions = pickTargetRepetitions();
 
   pickNextNote();
 }
 
+const MAX_CYCLE_SIZE = 6;
+
 /**
- * Pick target repetitions based on vocabulary size.
- * - 2 notes: 1-2 repetitions (less sticky since there's less variety)
- * - 3+ notes: 2-3 repetitions (stickier to reinforce each note)
+ * Shuffle array in place using Fisher-Yates algorithm.
  */
-function pickTargetRepetitions(): number {
-  if (state.noteIndices.length <= 2) {
-    return Math.random() < 0.5 ? 1 : 2;
+function shuffleArray<T>(array: T[]): void {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
   }
-  return Math.random() < 0.5 ? 2 : 3;
+}
+
+/**
+ * Refill the note queue with a shuffled selection of notes.
+ * Uses all notes up to MAX_CYCLE_SIZE, ensuring each note is asked
+ * once before any repeats.
+ */
+function refillNoteQueue(): void {
+  // Take up to MAX_CYCLE_SIZE notes (indices into noteIndices array)
+  const cycleSize = Math.min(state.noteIndices.length, MAX_CYCLE_SIZE);
+  const indices = Array.from({ length: cycleSize }, (_, i) => i);
+  shuffleArray(indices);
+  state.noteQueue = indices;
 }
 
 function pickNextNote(): void {
-  state.consecutiveCount++;
-
-  // Stay on the same note if we haven't hit our target repetitions
-  if (state.consecutiveCount < state.targetRepetitions) {
-    state.hasAnswered = false;
-    state.wasCorrect = null;
-    state.chosenIdx = null;
-    return;
+  // Refill queue if empty
+  if (state.noteQueue.length === 0) {
+    refillNoteQueue();
   }
 
-  // Time to switch notes
-  const previousIdx = state.currentNoteIdx;
-
-  // Pick a different note (avoid repeating the same note across sticky runs)
-  let newIdx = Math.floor(Math.random() * state.noteIndices.length);
-  if (newIdx === previousIdx && state.noteIndices.length > 1) {
-    // Keep re-rolling until we get a different note
-    while (newIdx === previousIdx) {
-      newIdx = Math.floor(Math.random() * state.noteIndices.length);
-    }
-  }
-
-  state.currentNoteIdx = newIdx;
-  state.consecutiveCount = 0;
-  state.targetRepetitions = pickTargetRepetitions();
+  // Pop the next note from the queue
+  state.currentNoteIdx = state.noteQueue.pop()!;
   state.hasAnswered = false;
   state.wasCorrect = null;
   state.chosenIdx = null;
