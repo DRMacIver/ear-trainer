@@ -110,12 +110,20 @@ function pickOtherOctave(target: FullTone, other: FullTone): number {
   const distOct5 = Math.abs(otherPitchOct5 - targetPitch);
 
   // Use octave 3 for A/B only if it's closer AND within 4 steps
-  if ((other === "A" || other === "B") && distOct3 <= 4 && distOct3 < distOct4) {
+  if (
+    (other === "A" || other === "B") &&
+    distOct3 <= 4 &&
+    distOct3 < distOct4
+  ) {
     return 3;
   }
 
   // Use octave 5 for C/D only if it's closer AND within 4 steps
-  if ((other === "C" || other === "D") && distOct5 <= 4 && distOct5 < distOct4) {
+  if (
+    (other === "C" || other === "D") &&
+    distOct5 <= 4 &&
+    distOct5 < distOct4
+  ) {
     return 5;
   }
 
@@ -167,7 +175,11 @@ function initQuestion(): InitQuestionResult {
   const octaveReady = findNoteReadyForOctaveIntro(persistentState);
   if (octaveReady) {
     // Return special result indicating octave introduction needed
-    return { isNewTarget: false, introducedNote: null, octaveIntro: octaveReady };
+    return {
+      isNewTarget: false,
+      introducedNote: null,
+      octaveIntro: octaveReady,
+    };
   }
 
   // If we're in a single-note cycle, continue with it
@@ -191,7 +203,10 @@ function initQuestion(): InitQuestionResult {
     const pair = selectMostUrgentPair(persistentState);
     if (pair) {
       // Use FSRS-selected pair
-      return { ...initQuestionFromPair(pair.target, pair.other), octaveIntro: null };
+      return {
+        ...initQuestionFromPair(pair.target, pair.other),
+        octaveIntro: null,
+      };
     }
   }
 
@@ -200,7 +215,10 @@ function initQuestion(): InitQuestionResult {
 }
 
 /** Initialize a single-note question using the cycle queue */
-function initSingleNoteQuestion(): { isNewTarget: boolean; introducedNote: FullTone | null } {
+function initSingleNoteQuestion(): {
+  isNewTarget: boolean;
+  introducedNote: FullTone | null;
+} {
   // Pop the next note from the queue
   const noteToPlay = singleNoteQueue.pop();
 
@@ -304,10 +322,19 @@ function initQuestionFromPair(
 }
 
 /** Initialize question using normal selection (adaptive difficulty) */
-function initQuestionNormal(): { isNewTarget: boolean; introducedNote: FullTone | null } {
+function initQuestionNormal(): {
+  isNewTarget: boolean;
+  introducedNote: FullTone | null;
+} {
   // Select target note (with stickiness - stays until 3 correct in a row)
-  const [targetNote, targetOctave, isNewTarget, isFirstOnTarget, updatedState, introducedNote] =
-    selectTargetNote(persistentState, pickTargetOctave);
+  const [
+    targetNote,
+    targetOctave,
+    isNewTarget,
+    isFirstOnTarget,
+    updatedState,
+    introducedNote,
+  ] = selectTargetNote(persistentState, pickTargetOctave);
   persistentState = updatedState;
 
   // Select other note based on current learning progress
@@ -381,8 +408,12 @@ async function playIntroductionSequence(): Promise<void> {
 
   isPlaying = true;
 
-  const octaveButtons = document.querySelectorAll("#octave-buttons .intro-note-btn");
-  const vocabButtons = document.querySelectorAll("#vocab-buttons .intro-note-btn");
+  const octaveButtons = document.querySelectorAll(
+    "#octave-buttons .intro-note-btn"
+  );
+  const vocabButtons = document.querySelectorAll(
+    "#vocab-buttons .intro-note-btn"
+  );
 
   // Play the introduced note in 3 octaves
   const octaves = [3, 4, 5];
@@ -403,7 +434,9 @@ async function playIntroductionSequence(): Promise<void> {
   for (let i = 0; i < introState.vocabNotes.length; i++) {
     const btn = vocabButtons[i];
     btn?.classList.add("playing");
-    await playNote(`${introState.vocabNotes[i]}4`, { duration: INTRO_NOTE_DURATION });
+    await playNote(`${introState.vocabNotes[i]}4`, {
+      duration: INTRO_NOTE_DURATION,
+    });
     await new Promise((r) => setTimeout(r, INTRO_NOTE_GAP));
     btn?.classList.remove("playing");
   }
@@ -555,8 +588,12 @@ async function playOctaveIntroductionSequence(): Promise<void> {
 
   isPlaying = true;
 
-  const octaveButtons = document.querySelectorAll("#octave-intro-buttons .intro-note-btn");
-  const vocabButtons = document.querySelectorAll("#octave-vocab-buttons .intro-note-btn");
+  const octaveButtons = document.querySelectorAll(
+    "#octave-intro-buttons .intro-note-btn"
+  );
+  const vocabButtons = document.querySelectorAll(
+    "#octave-vocab-buttons .intro-note-btn"
+  );
 
   // Play the note in all unlocked octaves (in order)
   const octaves = octaveIntroState.unlockedOctaves;
@@ -896,7 +933,8 @@ function handleChoice(chosenIndex: number): void {
     // displayOrder is randomized, check if chosen note is the target
     isCorrect = question.displayOrder[chosenIndex] === question.targetNote;
   } else {
-    const chosenFamily = chosenIndex === 0 ? question.family1 : question.family2;
+    const chosenFamily =
+      chosenIndex === 0 ? question.family1 : question.family2;
     isCorrect = chosenFamily === question.targetNote;
   }
 
@@ -907,7 +945,8 @@ function handleChoice(chosenIndex: number): void {
   if (isCorrect) {
     // 30% chance to repeat with swapped order (doesn't count for streak)
     // Only for two-note questions
-    shouldRepeatSwapped = !isSingleNote && Math.random() < REPEAT_CORRECT_CHANCE;
+    shouldRepeatSwapped =
+      !isSingleNote && Math.random() < REPEAT_CORRECT_CHANCE;
   } else {
     // Always retry on wrong answer
     shouldRetry = Math.random() < RETRY_CHANCE;
@@ -956,7 +995,8 @@ function renderFeedback(): void {
         <br><small>Press Space to continue.</small>
       `;
     } else {
-      const targetPosition = question.family1 === question.targetNote ? "first" : "second";
+      const targetPosition =
+        question.family1 === question.targetNote ? "first" : "second";
       feedback.innerHTML = `
         Incorrect. The ${question.targetNote} was ${targetPosition} (the other note was ${question.otherNote}).
         <br><button id="replay-btn" class="play-again-btn" style="margin-top: 0.5rem;">Replay Both Notes</button>
@@ -1083,10 +1123,9 @@ function renderIntroPage(showBackLink: boolean): void {
         <p>This exercise trains you to recognize musical notes by ear. You'll progress through increasingly difficult challenges:</p>
 
         <ol class="intro-steps">
-          <li><strong>Two-note comparison:</strong> Two notes play - identify which one was the target note (e.g., "Which was the C?").</li>
-          <li><strong>Single-note identification:</strong> Once you're reliable at comparing notes, you'll hear just one note and identify it directly.</li>
-          <li><strong>Expanding vocabulary:</strong> You start with C and G. As you master each pair, new notes are introduced.</li>
-          <li><strong>Multiple octaves:</strong> After mastering a note in one octave, you'll learn to recognize it in higher and lower octaves too.</li>
+          <li>Start with <strong>two-note comparison</strong>: Two notes play - identify which one was the target note (e.g., "Which was the C?").</li>
+          <li>Progress to <strong>single-note identification</strong>: Once you're reliable at comparing notes, you'll hear just one note and identify it directly.</li>
+          <li><strong>Expanding vocabulary:</strong> You start with C and G. As you master notes, new ones are introduced.</li>
         </ol>
       </div>
 
