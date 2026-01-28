@@ -47,6 +47,8 @@ interface QuestionState {
   isFirstInStreak: boolean;
   countsForStreak: boolean; // False for retries/repeats
   startTime: number;
+  // For single-note questions: which option is displayed first (randomized)
+  displayOrder: [FullTone, FullTone];
 }
 
 // Introduction mode state (for new notes)
@@ -229,6 +231,9 @@ function initSingleNoteQuestion(): { isNewTarget: boolean; introducedNote: FullT
   const playedOctave = pickTargetOctave(noteToPlay);
   const playedWithOctave = `${noteToPlay}${playedOctave}`;
 
+  // Randomize display order for the choice buttons
+  const displayOrder = randomizeOrder(noteToPlay, alternative);
+
   question = {
     questionType: "single-note",
     note1: playedWithOctave, // The note that will be played
@@ -242,6 +247,7 @@ function initSingleNoteQuestion(): { isNewTarget: boolean; introducedNote: FullT
     isFirstInStreak: true,
     countsForStreak: true,
     startTime: Date.now(),
+    displayOrder,
   };
 
   return { isNewTarget: false, introducedNote: null };
@@ -291,6 +297,7 @@ function initQuestionFromPair(
     isFirstInStreak: true, // FSRS repeats count for tracking
     countsForStreak: true,
     startTime: Date.now(),
+    displayOrder: [targetNote, otherNote], // Not used for two-note questions
   };
 
   return { isNewTarget, introducedNote: null };
@@ -329,6 +336,7 @@ function initQuestionNormal(): { isNewTarget: boolean; introducedNote: FullTone 
     isFirstInStreak: isFirstOnTarget,
     countsForStreak: true, // New questions count
     startTime: Date.now(),
+    displayOrder: [targetNote, otherNote], // Not used for two-note questions
   };
 
   return { isNewTarget, introducedNote };
@@ -712,10 +720,10 @@ function render(): void {
     ? "A note plays. Identify which note it is."
     : "Two notes play. Identify the named note.";
   const keyHints = isSingleNote
-    ? `<kbd>1</kbd>/<kbd>←</kbd> ${question.targetNote}, <kbd>2</kbd>/<kbd>→</kbd> ${question.otherNote}, <kbd>R</kbd> Replay, <kbd>Space</kbd> Continue`
+    ? `<kbd>1</kbd>/<kbd>←</kbd> ${question.displayOrder[0]}, <kbd>2</kbd>/<kbd>→</kbd> ${question.displayOrder[1]}, <kbd>R</kbd> Replay, <kbd>Space</kbd> Continue`
     : "<kbd>1</kbd>/<kbd>←</kbd> First, <kbd>2</kbd>/<kbd>→</kbd> Second, <kbd>R</kbd> Replay, <kbd>Space</kbd> Continue";
   const questionText = isSingleNote
-    ? `Is this ${question.targetNote} or ${question.otherNote}?`
+    ? `Is this ${question.displayOrder[0]} or ${question.displayOrder[1]}?`
     : `Which was the ${question.targetNote}?`;
 
   app.innerHTML = `
@@ -767,11 +775,11 @@ function renderChoiceButtons(): void {
   const isSingleNote = question.questionType === "single-note";
 
   // For two-note: "First" and "Second"
-  // For single-note: the note names (target and other)
+  // For single-note: use displayOrder (randomized between target and other)
   const choices = isSingleNote
     ? [
-        { label: question.targetNote, family: question.targetNote },
-        { label: question.otherNote, family: question.otherNote },
+        { label: question.displayOrder[0], family: question.displayOrder[0] },
+        { label: question.displayOrder[1], family: question.displayOrder[1] },
       ]
     : [
         { label: "First", family: question.family1 },
@@ -881,11 +889,11 @@ function handleChoice(chosenIndex: number): void {
   const isSingleNote = question.questionType === "single-note";
 
   // For two-note: first choice is family1, second is family2
-  // For single-note: first choice is targetNote, second is otherNote
+  // For single-note: check if chosen option in displayOrder is the target
   let isCorrect: boolean;
   if (isSingleNote) {
-    // For single-note, index 0 = targetNote (correct), index 1 = otherNote (wrong)
-    isCorrect = chosenIndex === 0;
+    // displayOrder is randomized, check if chosen note is the target
+    isCorrect = question.displayOrder[chosenIndex] === question.targetNote;
   } else {
     const chosenFamily = chosenIndex === 0 ? question.family1 : question.family2;
     isCorrect = chosenFamily === question.targetNote;
@@ -1023,6 +1031,7 @@ function retryQuestion(): void {
       isFirstInStreak: false, // Retry never counts for familiarity
       countsForStreak: false, // Retries/repeats don't count for streak
       startTime: Date.now(),
+      displayOrder: [question.targetNote, question.otherNote], // Not used for two-note
     };
   }
 
