@@ -19,6 +19,8 @@ import {
   getUnplayedSingleNoteVariants,
   parseVariantKey,
   consumeForcedVariant,
+  startNewNoteFocus,
+  consumeNewNoteFocusQuestion,
   ToneQuizState,
   FullTone,
   FULL_TONES,
@@ -277,14 +279,33 @@ function initTwoNoteQuestion(): boolean {
     throw new Error("No unlocked two-tone variants");
   }
 
-  // Check for unplayed variants FIRST - they take priority over stickiness
-  const unplayedVariants = getUnplayedTwoToneVariants(persistentState);
-
   let targetNote: FullTone;
   let isNewTarget = false;
   let variantsToChooseFrom: string[];
 
-  if (unplayedVariants.length > 0) {
+  // Check for new note focus mode FIRST - highest priority
+  const [focusNote, updatedState] = consumeNewNoteFocusQuestion(persistentState);
+  if (focusNote) {
+    persistentState = updatedState;
+    saveState(persistentState);
+
+    // Use focus note as target, pick random other from vocab
+    targetNote = focusNote;
+    isNewTarget = currentStickyNote !== null && targetNote !== currentStickyNote;
+
+    // Update stickiness to match focus
+    currentStickyNote = targetNote;
+    questionsRemainingOnNote = persistentState.newNoteFocusRemaining;
+
+    // Find variants for this target
+    variantsToChooseFrom = unlockedVariants.filter((v) => {
+      const { pair } = parseVariantKey(v);
+      const [a, b] = pair.split("-") as [FullTone, FullTone];
+      return a === targetNote || b === targetNote;
+    });
+  } else if (getUnplayedTwoToneVariants(persistentState).length > 0) {
+    // Check for unplayed variants - they take priority over stickiness
+    const unplayedVariants = getUnplayedTwoToneVariants(persistentState);
     // Prioritize unplayed variants - pick a target note from them
     const unplayedNotes = new Set<FullTone>();
     for (const variant of unplayedVariants) {
@@ -576,7 +597,13 @@ async function replayIntroSequence(): Promise<void> {
 
 /** Finish introduction and return to normal quiz */
 function finishIntroduction(): void {
+  // Start new note focus mode for the introduced note
+  if (introState) {
+    persistentState = startNewNoteFocus(persistentState, introState.introducedNote);
+    saveState(persistentState);
+  }
   introState = null;
+  initQuestion();
   render();
   playQuestionNotes();
 }

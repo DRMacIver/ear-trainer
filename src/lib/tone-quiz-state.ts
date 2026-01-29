@@ -58,6 +58,8 @@ export const NOTE_UNLOCK_THRESHOLD = 18;
 export const NOTE_UNLOCK_MIN_QUESTIONS = 10;
 /** Questions between note unlocks (cooldown) */
 export const NOTE_UNLOCK_COOLDOWN = 20;
+/** Questions per other vocab note when focusing on a new note */
+export const NEW_NOTE_FOCUS_PER_PAIR = 3;
 
 /** Unlock order for two-tone variants (octave pairs) */
 export const TWO_TONE_UNLOCK_ORDER = ["4-4", "3-3", "5-5", "3-4", "4-5"] as const;
@@ -130,6 +132,10 @@ export interface ToneQuizState {
   pendingUnlocks: PendingUnlock[]; // Queue of note unlocks waiting for cooldown
   questionsSinceLastUnlock: number; // Counter for note unlock cooldown
 
+  // New note focus mode: after introduction, focus on the new note as target
+  newNoteFocusNote: FullTone | null; // The newly introduced note to focus on
+  newNoteFocusRemaining: number; // Questions remaining in focus mode
+
   // FSRS spaced repetition state
   pairCards: Record<string, TonePairCard>; // "target-other" -> card state
   session: SessionInfo;
@@ -155,6 +161,8 @@ function createInitialState(): ToneQuizState {
     playedVariants: [],
     pendingUnlocks: [],
     questionsSinceLastUnlock: 0,
+    newNoteFocusNote: null,
+    newNoteFocusRemaining: 0,
     pairCards: {},
     session: {
       sessionStartTime: Date.now(),
@@ -572,6 +580,62 @@ export function getUnplayedTwoToneVariants(state: ToneQuizState): string[] {
  */
 export function getUnplayedSingleNoteVariants(state: ToneQuizState): string[] {
   return getUnplayedVariants(state).filter((v) => v.includes(":single-note:"));
+}
+
+// ============================================================================
+// New Note Focus Mode Functions
+// ============================================================================
+
+/**
+ * Check if we're in new note focus mode.
+ */
+export function isInNewNoteFocusMode(state: ToneQuizState): boolean {
+  return state.newNoteFocusNote !== null && state.newNoteFocusRemaining > 0;
+}
+
+/**
+ * Start new note focus mode after a note is introduced.
+ * Sets up focus on the new note for 3 questions per other vocab note.
+ */
+export function startNewNoteFocus(
+  state: ToneQuizState,
+  newNote: FullTone
+): ToneQuizState {
+  // Calculate how many questions: 3 per other vocab note (excluding the new note)
+  const otherVocabCount = state.learningVocabulary.filter(n => n !== newNote).length;
+  const totalQuestions = otherVocabCount * NEW_NOTE_FOCUS_PER_PAIR;
+
+  return {
+    ...state,
+    newNoteFocusNote: newNote,
+    newNoteFocusRemaining: totalQuestions,
+  };
+}
+
+/**
+ * Consume one question from new note focus mode.
+ * Returns the focus note and decrements the remaining count.
+ * Returns [focusNote, updatedState] or [null, state] if not in focus mode.
+ */
+export function consumeNewNoteFocusQuestion(
+  state: ToneQuizState
+): [FullTone | null, ToneQuizState] {
+  if (!isInNewNoteFocusMode(state)) {
+    return [null, state];
+  }
+
+  const focusNote = state.newNoteFocusNote!;
+  const remaining = state.newNoteFocusRemaining - 1;
+
+  return [
+    focusNote,
+    {
+      ...state,
+      newNoteFocusRemaining: remaining,
+      // Clear focus note when done
+      newNoteFocusNote: remaining <= 0 ? null : focusNote,
+    },
+  ];
 }
 
 /**
