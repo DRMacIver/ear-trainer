@@ -154,7 +154,7 @@ export function renderToneQuizStats(): void {
 
     // Overall column
     const overallPct = Math.round(overallPerf * 100);
-    matrixHtml += `<td class="${overallClass}"><strong>${overallPct}%</strong></td>`;
+    matrixHtml += `<td class="${overallClass} perf-clickable" data-target="${target}" title="Click to play ${target}"><strong>${overallPct}%</strong></td>`;
     matrixHtml += `</tr>`;
   }
 
@@ -188,9 +188,12 @@ export function renderToneQuizStats(): void {
   clickableCells.forEach((cell) => {
     cell.addEventListener("click", () => {
       const target = cell.getAttribute("data-target") as FullTone;
-      const other = cell.getAttribute("data-other") as FullTone;
+      const other = cell.getAttribute("data-other") as FullTone | null;
       if (target && other) {
         playNotePair(target, other);
+      } else if (target) {
+        // Overall column - just play the target note
+        playNote(`${target}4`, { duration: NOTE_DURATION });
       }
     });
   });
