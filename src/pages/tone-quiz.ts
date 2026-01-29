@@ -1007,3 +1007,14 @@ export function renderToneQuiz(): void {
   render();
   playQuestionNotes();
 }
+
+// Clean up handlers on HMR to prevent stale handlers from persisting
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    if (keyboardHandler) {
+      document.removeEventListener("keydown", keyboardHandler);
+      keyboardHandler = null;
+    }
+    clearAutoAdvance();
+  });
+}
