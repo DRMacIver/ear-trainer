@@ -51,6 +51,15 @@ import {
   getNextVariantToUnlock,
   recordVariantResult,
   checkNoteUnlock,
+  // Ordering question functions
+  getVocabInChromaticOrder,
+  shouldTriggerOrdering,
+  recordOrderingResult,
+  enterOrderingMode,
+  incrementOrderingInterval,
+  ORDERING_INTERVAL,
+  ORDERING_STRUGGLE_WINDOW,
+  ORDERING_EXIT_STREAK,
   NOTE_SEMITONES,
   AVAILABLE_OCTAVES,
   MASTERY_WINDOW,
@@ -1841,5 +1850,197 @@ describe("accelerated mode", () => {
       variantKey: "C-G:two-note:4-4",
     });
     expect(state.unlockedVariants.length).toBe(variantsBeforeWrong);
+  });
+});
+
+// ============================================================================
+// Ordering Question Tests
+// ============================================================================
+
+describe("getVocabInChromaticOrder", () => {
+  it("sorts vocabulary in chromatic order", () => {
+    expect(getVocabInChromaticOrder(["G", "C", "E"])).toEqual(["C", "E", "G"]);
+    expect(getVocabInChromaticOrder(["A", "D", "G", "C"])).toEqual(["C", "D", "G", "A"]);
+    expect(getVocabInChromaticOrder(["B", "F", "D"])).toEqual(["D", "F", "B"]);
+  });
+
+  it("handles single note", () => {
+    expect(getVocabInChromaticOrder(["C"])).toEqual(["C"]);
+  });
+
+  it("handles all notes", () => {
+    expect(getVocabInChromaticOrder(["B", "D", "F", "A", "C", "E", "G"])).toEqual([
+      "C", "D", "E", "F", "G", "A", "B",
+    ]);
+  });
+});
+
+describe("shouldTriggerOrdering", () => {
+  beforeEach(() => {
+    localStorageMock.clear();
+  });
+
+  it("returns false with fewer than 3 notes in vocabulary", () => {
+    const state = loadState();
+    expect(state.learningVocabulary).toEqual(["C", "G"]);
+    expect(shouldTriggerOrdering(state)).toBe(false);
+  });
+
+  it("returns true when already in ordering mode", () => {
+    let state = loadState();
+    state.learningVocabulary = ["C", "G", "E"];
+    state.isInOrderingMode = true;
+    expect(shouldTriggerOrdering(state)).toBe(true);
+  });
+
+  it("returns true when interval reached", () => {
+    let state = loadState();
+    state.learningVocabulary = ["C", "G", "E"];
+    state.orderingQuestionInterval = ORDERING_INTERVAL;
+    expect(shouldTriggerOrdering(state)).toBe(true);
+  });
+
+  it("returns false when interval not reached", () => {
+    let state = loadState();
+    state.learningVocabulary = ["C", "G", "E"];
+    state.orderingQuestionInterval = ORDERING_INTERVAL - 1;
+    expect(shouldTriggerOrdering(state)).toBe(false);
+  });
+
+  it("returns true when struggling (< 50% on last 10)", () => {
+    let state = loadState();
+    state.learningVocabulary = ["C", "G", "E"];
+    // Create history with < 50% correct
+    for (let i = 0; i < ORDERING_STRUGGLE_WINDOW; i++) {
+      state.history.push({
+        timestamp: Date.now(),
+        noteA: "C4",
+        noteB: "G4",
+        targetNote: "C",
+        otherNote: "G",
+        correct: i < 4, // Only 4/10 correct = 40%
+        wasFirstInStreak: true,
+      });
+    }
+    expect(shouldTriggerOrdering(state)).toBe(true);
+  });
+
+  it("returns false when not struggling", () => {
+    let state = loadState();
+    state.learningVocabulary = ["C", "G", "E"];
+    // Create history with >= 50% correct
+    for (let i = 0; i < ORDERING_STRUGGLE_WINDOW; i++) {
+      state.history.push({
+        timestamp: Date.now(),
+        noteA: "C4",
+        noteB: "G4",
+        targetNote: "C",
+        otherNote: "G",
+        correct: i < 6, // 6/10 correct = 60%
+        wasFirstInStreak: true,
+      });
+    }
+    expect(shouldTriggerOrdering(state)).toBe(false);
+  });
+});
+
+describe("recordOrderingResult", () => {
+  beforeEach(() => {
+    localStorageMock.clear();
+  });
+
+  it("tracks ordering performance", () => {
+    let state = loadState();
+    expect(state.orderingPerformance).toEqual([]);
+
+    state = recordOrderingResult(state, true);
+    expect(state.orderingPerformance).toEqual([true]);
+
+    state = recordOrderingResult(state, false);
+    expect(state.orderingPerformance).toEqual([true, false]);
+  });
+
+  it("resets ordering interval", () => {
+    let state = loadState();
+    state.orderingQuestionInterval = 30;
+
+    state = recordOrderingResult(state, true);
+    expect(state.orderingQuestionInterval).toBe(0);
+  });
+
+  it("increments correct streak on correct answer", () => {
+    let state = loadState();
+    expect(state.orderingCorrectStreak).toBe(0);
+
+    state = recordOrderingResult(state, true);
+    expect(state.orderingCorrectStreak).toBe(1);
+
+    state = recordOrderingResult(state, true);
+    expect(state.orderingCorrectStreak).toBe(2);
+  });
+
+  it("resets streak and enters ordering mode on wrong answer", () => {
+    let state = loadState();
+    state.orderingCorrectStreak = 2;
+
+    state = recordOrderingResult(state, false);
+    expect(state.orderingCorrectStreak).toBe(0);
+    expect(state.isInOrderingMode).toBe(true);
+  });
+
+  it("exits ordering mode after 3 correct in a row", () => {
+    let state = loadState();
+    state.isInOrderingMode = true;
+
+    for (let i = 0; i < ORDERING_EXIT_STREAK; i++) {
+      state = recordOrderingResult(state, true);
+    }
+
+    expect(state.isInOrderingMode).toBe(false);
+    expect(state.orderingCorrectStreak).toBe(0);
+  });
+
+  it("stays in ordering mode until 3 correct in a row", () => {
+    let state = loadState();
+    state.isInOrderingMode = true;
+
+    // 2 correct, then 1 wrong
+    state = recordOrderingResult(state, true);
+    state = recordOrderingResult(state, true);
+    state = recordOrderingResult(state, false);
+
+    expect(state.isInOrderingMode).toBe(true);
+    expect(state.orderingCorrectStreak).toBe(0);
+  });
+});
+
+describe("enterOrderingMode", () => {
+  beforeEach(() => {
+    localStorageMock.clear();
+  });
+
+  it("sets isInOrderingMode to true", () => {
+    let state = loadState();
+    expect(state.isInOrderingMode).toBe(false);
+
+    state = enterOrderingMode(state);
+    expect(state.isInOrderingMode).toBe(true);
+  });
+});
+
+describe("incrementOrderingInterval", () => {
+  beforeEach(() => {
+    localStorageMock.clear();
+  });
+
+  it("increments the ordering question interval", () => {
+    let state = loadState();
+    expect(state.orderingQuestionInterval).toBe(0);
+
+    state = incrementOrderingInterval(state);
+    expect(state.orderingQuestionInterval).toBe(1);
+
+    state = incrementOrderingInterval(state);
+    expect(state.orderingQuestionInterval).toBe(2);
   });
 });

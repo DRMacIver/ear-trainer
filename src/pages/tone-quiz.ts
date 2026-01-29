@@ -22,6 +22,12 @@ import {
   isInNewNoteFocusMode,
   startNewNoteFocus,
   consumeNewNoteFocusQuestion,
+  shouldTriggerOrdering,
+  getVocabInChromaticOrder,
+  recordOrderingResult,
+  enterOrderingMode,
+  incrementOrderingInterval,
+  AVAILABLE_OCTAVES,
   ToneQuizState,
   FullTone,
   FULL_TONES,
@@ -32,6 +38,17 @@ const NOTE_DURATION = 0.6;
 const GAP_BETWEEN_NOTES = 300; // ms
 const INTRO_NOTE_DURATION = 0.5;
 const INTRO_NOTE_GAP = 150; // ms
+const ORDERING_NOTE_GAP = 400; // ms between notes in ordering sequence
+
+/** Shuffle an array using Fisher-Yates algorithm */
+function shuffleArray<T>(array: T[]): T[] {
+  const result = [...array];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
 
 /** Detect if user is on a touch device (mobile/tablet) */
 function isTouchDevice(): boolean {
@@ -59,6 +76,16 @@ interface QuestionState {
   variantKey: string;
 }
 
+interface OrderingQuestionState {
+  questionType: "ordering";
+  notesPlayed: { note: FullTone; octave: number }[]; // Notes in play order
+  correctOrder: FullTone[]; // Chromatic order
+  userOrder: (FullTone | null)[]; // User's current arrangement
+  hasConfirmed: boolean;
+  wrongPositions: number[]; // Indices of incorrect positions after confirm
+  attemptCount: number; // Number of attempts on this question
+}
+
 // Introduction mode state (for new notes)
 interface IntroductionState {
   introducedNote: FullTone;
@@ -67,7 +94,12 @@ interface IntroductionState {
 
 let persistentState: ToneQuizState;
 let question: QuestionState;
+let orderingQuestion: OrderingQuestionState | null = null;
 let introState: IntroductionState | null = null;
+
+// Practice mode: locks to a specific exercise type, no unlocks
+type PracticeMode = "two-note" | "single-note" | "ordering" | null;
+let practiceMode: PracticeMode = null;
 let keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
 let cleanupHandler: (() => void) | null = null; // Track cleanup to prevent stale handlers
 let autoAdvanceTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -116,19 +148,66 @@ function showModal(message: string, onDismiss?: () => void): void {
 type TransitionInfo = {
   showModal: boolean;
   modalMessage?: string;
+  isOrdering?: boolean;
 };
+
+/** Initialize an ordering question */
+function initOrderingQuestion(): void {
+  const vocab = persistentState.learningVocabulary;
+  const correctOrder = getVocabInChromaticOrder(vocab);
+
+  // Create notes in random order with random octaves
+  const notesPlayed = shuffleArray(
+    vocab.map((note) => ({
+      note,
+      octave: AVAILABLE_OCTAVES[Math.floor(Math.random() * AVAILABLE_OCTAVES.length)],
+    }))
+  );
+
+  orderingQuestion = {
+    questionType: "ordering",
+    notesPlayed,
+    correctOrder,
+    userOrder: new Array(vocab.length).fill(null),
+    hasConfirmed: false,
+    wrongPositions: [],
+    attemptCount: 0,
+  };
+
+  // Enter ordering mode
+  persistentState = enterOrderingMode(persistentState);
+  saveState(persistentState);
+}
 
 /** Initialize a new question. Returns transition info for modal display. */
 function initQuestion(): TransitionInfo {
   const prevQuestionType = lastQuestionType;
 
-  // Check for a forced variant from accelerated mode
-  const [forcedVariant, updatedState] = consumeForcedVariant(persistentState);
-  if (forcedVariant) {
-    persistentState = updatedState;
-    saveState(persistentState);
-    const isNewTarget = initQuestionFromVariant(forcedVariant);
-    return getTransitionInfo(prevQuestionType, question.questionType, isNewTarget);
+  // Practice mode: force specific exercise type
+  if (practiceMode === "ordering") {
+    initOrderingQuestion();
+    return { showModal: false, isOrdering: true };
+  }
+
+  // Check for ordering question trigger first (only in normal mode)
+  if (!practiceMode && shouldTriggerOrdering(persistentState)) {
+    initOrderingQuestion();
+    return { showModal: true, modalMessage: "Order the Notes", isOrdering: true };
+  }
+
+  // Clear any previous ordering state
+  orderingQuestion = null;
+
+  // In practice mode, skip forced variants and accelerated mode
+  if (!practiceMode) {
+    // Check for a forced variant from accelerated mode
+    const [forcedVariant, updatedState] = consumeForcedVariant(persistentState);
+    if (forcedVariant) {
+      persistentState = updatedState;
+      saveState(persistentState);
+      const isNewTarget = initQuestionFromVariant(forcedVariant);
+      return getTransitionInfo(prevQuestionType, question.questionType, isNewTarget);
+    }
   }
 
   // Decide question type based on what's available and stickiness
@@ -137,8 +216,13 @@ function initQuestion(): TransitionInfo {
 
   let questionType: QuestionType;
 
-  // Force two-note when in new note focus mode
-  if (isInNewNoteFocusMode(persistentState)) {
+  // Practice mode forces specific type
+  if (practiceMode === "two-note") {
+    questionType = "two-note";
+  } else if (practiceMode === "single-note") {
+    questionType = "single-note";
+  } else if (isInNewNoteFocusMode(persistentState)) {
+    // Force two-note when in new note focus mode
     questionType = "two-note";
   } else if (singleNoteVariants.length === 0) {
     // Only two-tone available
@@ -465,8 +549,25 @@ async function playQuestionNotes(): Promise<void> {
   isPlaying = false;
 }
 
-/** Get vocab notes in chromatic order */
-function getVocabInChromaticOrder(): FullTone[] {
+/** Play all notes for an ordering question */
+async function playOrderingNotes(): Promise<void> {
+  if (!orderingQuestion) return;
+
+  isPlaying = true;
+
+  for (let i = 0; i < orderingQuestion.notesPlayed.length; i++) {
+    const { note, octave } = orderingQuestion.notesPlayed[i];
+    await playNote(`${note}${octave}`, { duration: NOTE_DURATION });
+    if (i < orderingQuestion.notesPlayed.length - 1) {
+      await new Promise((resolve) => setTimeout(resolve, ORDERING_NOTE_GAP));
+    }
+  }
+
+  isPlaying = false;
+}
+
+/** Get current vocab notes in chromatic order (for introduction UI) */
+function getCurrentVocabInChromaticOrder(): FullTone[] {
   return FULL_TONES.filter((n) =>
     persistentState.learningVocabulary.includes(n)
   );
@@ -476,7 +577,7 @@ function getVocabInChromaticOrder(): FullTone[] {
 function startIntroduction(note: FullTone): void {
   introState = {
     introducedNote: note,
-    vocabNotes: getVocabInChromaticOrder(),
+    vocabNotes: getCurrentVocabInChromaticOrder(),
   };
   renderIntroduction();
   playIntroductionSequence();
@@ -647,6 +748,401 @@ function finishIntroduction(): void {
   playQuestionNotes();
 }
 
+// ============================================================================
+// Ordering Question UI
+// ============================================================================
+
+/** Render the ordering question UI */
+function renderOrdering(): void {
+  if (!orderingQuestion) return;
+
+  const app = document.getElementById("app")!;
+  const isTouch = isTouchDevice();
+  const vocabDisplay = persistentState.learningVocabulary.join(", ");
+  const recentHistory = persistentState.history.slice(-20);
+  const recentCorrect = recentHistory.filter((r) => r.correct).length;
+  const totalPlayed = persistentState.history.length;
+
+  // Get notes that are placed and available
+  const placedNotes = new Set(orderingQuestion.userOrder.filter((n): n is FullTone => n !== null));
+  const availableNotes = orderingQuestion.correctOrder.filter((n) => !placedNotes.has(n));
+
+  // Position labels
+  const positionLabels = ["1st", "2nd", "3rd", "4th", "5th", "6th", "7th"];
+
+  const practiceBanner = practiceMode
+    ? `<div class="practice-mode-banner">
+        <span>Practice Mode: Ordering</span>
+        <a href="#/quiz">Exit Practice</a>
+      </div>`
+    : "";
+
+  app.innerHTML = `
+    <h1>Tone Quiz</h1>
+    ${practiceBanner}
+    <p>Drag the notes into chromatic order (lowest to highest).</p>
+    ${isTouch ? "" : `<p class="keyboard-hints"><strong>Keys:</strong> <kbd>R</kbd> Replay All</p>`}
+
+    <div class="exercise-container">
+      <div class="controls">
+        <button class="play-again-btn" id="replay-ordering-btn">Replay All</button>
+      </div>
+
+      <div class="ordering-section">
+        <h3>Arrange in order:</h3>
+        <div class="ordering-drop-zones" id="drop-zones">
+          ${orderingQuestion.correctOrder
+            .map((_, i) => {
+              const placed = orderingQuestion!.userOrder[i];
+              const isWrong = orderingQuestion!.wrongPositions.includes(i);
+              const slotClass = `ordering-slot${placed ? " filled" : ""}${isWrong ? " wrong" : ""}`;
+              return `
+                <div class="ordering-slot-container">
+                  <div class="${slotClass}" data-slot="${i}" data-note="${placed || ""}">
+                    ${placed || ""}
+                  </div>
+                  <span class="ordering-slot-label">${positionLabels[i]}</span>
+                </div>
+              `;
+            })
+            .join("")}
+        </div>
+      </div>
+
+      <div class="ordering-section">
+        <h3>Available notes:</h3>
+        <div class="ordering-available" id="available-notes">
+          ${availableNotes
+            .map(
+              (note) => `
+                <div class="ordering-note" draggable="true" data-note="${note}">${note}</div>
+              `
+            )
+            .join("")}
+        </div>
+      </div>
+
+      <div class="ordering-actions">
+        <button class="check-button" id="confirm-ordering-btn" ${
+          placedNotes.size !== orderingQuestion.correctOrder.length ? "disabled" : ""
+        }>Confirm</button>
+      </div>
+
+      <div id="ordering-feedback"></div>
+
+      ${practiceMode ? "" : `
+      <div class="stats">
+        <span class="stats-label">Recent:</span>
+        <span>${recentCorrect} / ${recentHistory.length}</span>
+        <span class="stats-label" style="margin-left: 1rem;">Total:</span>
+        <span>${totalPlayed}</span>
+      </div>
+      `}
+
+      <div class="learning-info">
+        <span class="stats-label">Learning:</span>
+        <span>${vocabDisplay}</span>
+        ${practiceMode ? "" : '<a href="#/stats" class="stats-link">View Stats</a>'}
+        <a href="#/about" class="stats-link">About</a>
+      </div>
+
+      ${practiceMode ? "" : `
+      <div class="danger-zone">
+        <button class="danger-btn" id="clear-history-btn">Clear History</button>
+        <p class="danger-warning">This will reset all your progress</p>
+      </div>
+      `}
+    </div>
+  `;
+
+  setupOrderingEventListeners();
+}
+
+/** Handle drag start for ordering notes */
+function handleDragStart(e: DragEvent): void {
+  const target = e.target as HTMLElement;
+  const note = target.dataset.note;
+  if (!note) return;
+
+  e.dataTransfer!.setData("text/plain", note);
+  e.dataTransfer!.effectAllowed = "move";
+  target.classList.add("dragging");
+}
+
+/** Handle drag end */
+function handleDragEnd(e: DragEvent): void {
+  const target = e.target as HTMLElement;
+  target.classList.remove("dragging");
+
+  // Remove all drag-over states
+  document.querySelectorAll(".drag-over").forEach((el) => el.classList.remove("drag-over"));
+}
+
+/** Handle drag over for drop zones */
+function handleDragOver(e: DragEvent): void {
+  e.preventDefault();
+  e.dataTransfer!.dropEffect = "move";
+  const target = e.target as HTMLElement;
+  const slot = target.closest(".ordering-slot");
+  if (slot) {
+    slot.classList.add("drag-over");
+  }
+}
+
+/** Handle drag leave for drop zones */
+function handleDragLeave(e: DragEvent): void {
+  const target = e.target as HTMLElement;
+  const slot = target.closest(".ordering-slot");
+  if (slot) {
+    slot.classList.remove("drag-over");
+  }
+}
+
+/** Handle drop on a slot */
+function handleDrop(e: DragEvent): void {
+  e.preventDefault();
+  if (!orderingQuestion) return;
+
+  const target = e.target as HTMLElement;
+  const slot = target.closest(".ordering-slot") as HTMLElement;
+  if (!slot) return;
+
+  slot.classList.remove("drag-over");
+
+  const droppedNote = e.dataTransfer!.getData("text/plain") as FullTone;
+  const slotIndex = parseInt(slot.dataset.slot!, 10);
+  const existingNote = orderingQuestion.userOrder[slotIndex];
+
+  // Find where the dropped note came from (if it was in a slot)
+  const sourceIndex = orderingQuestion.userOrder.indexOf(droppedNote);
+
+  // If there's a note in the target slot, swap them
+  if (existingNote) {
+    if (sourceIndex >= 0) {
+      // Swap: move existing note to source position
+      orderingQuestion.userOrder[sourceIndex] = existingNote;
+    }
+    // If source was available pool, existing note goes back to pool (handled by placing new note)
+  } else if (sourceIndex >= 0) {
+    // Clear the source slot
+    orderingQuestion.userOrder[sourceIndex] = null;
+  }
+
+  // Place the dropped note
+  orderingQuestion.userOrder[slotIndex] = droppedNote;
+
+  // Clear confirmation state when user modifies
+  orderingQuestion.hasConfirmed = false;
+  orderingQuestion.wrongPositions = [];
+
+  renderOrdering();
+}
+
+/** Handle drop back to available notes pool */
+function handleDropToPool(e: DragEvent): void {
+  e.preventDefault();
+  if (!orderingQuestion) return;
+
+  const droppedNote = e.dataTransfer!.getData("text/plain") as FullTone;
+  const sourceIndex = orderingQuestion.userOrder.indexOf(droppedNote);
+
+  if (sourceIndex >= 0) {
+    orderingQuestion.userOrder[sourceIndex] = null;
+    orderingQuestion.hasConfirmed = false;
+    orderingQuestion.wrongPositions = [];
+    renderOrdering();
+  }
+}
+
+/** Handle click on a slot to return note to pool */
+function handleSlotClick(e: MouseEvent): void {
+  if (!orderingQuestion) return;
+
+  const target = e.target as HTMLElement;
+  const slot = target.closest(".ordering-slot") as HTMLElement;
+  if (!slot || !slot.classList.contains("filled")) return;
+
+  const slotIndex = parseInt(slot.dataset.slot!, 10);
+  orderingQuestion.userOrder[slotIndex] = null;
+  orderingQuestion.hasConfirmed = false;
+  orderingQuestion.wrongPositions = [];
+  renderOrdering();
+}
+
+/** Check the ordering answer */
+function checkOrderingAnswer(): void {
+  if (!orderingQuestion) return;
+
+  const wrong: number[] = [];
+  for (let i = 0; i < orderingQuestion.correctOrder.length; i++) {
+    if (orderingQuestion.userOrder[i] !== orderingQuestion.correctOrder[i]) {
+      wrong.push(i);
+    }
+  }
+
+  orderingQuestion.wrongPositions = wrong;
+  orderingQuestion.hasConfirmed = true;
+  orderingQuestion.attemptCount++;
+
+  const isCorrect = wrong.length === 0;
+
+  // In practice mode, skip state recording
+  if (!practiceMode) {
+    persistentState = recordOrderingResult(persistentState, isCorrect);
+    saveState(persistentState);
+  }
+
+  renderOrdering();
+  renderOrderingFeedback(isCorrect);
+}
+
+/** Render feedback for ordering question */
+function renderOrderingFeedback(isCorrect: boolean): void {
+  const feedback = document.getElementById("ordering-feedback")!;
+  const isTouch = isTouchDevice();
+  const continueHint = isTouch ? "Tap to continue" : "Press Space to continue";
+
+  if (isCorrect) {
+    // Show streak info only in normal mode
+    const streakInfo =
+      !practiceMode && persistentState.orderingCorrectStreak > 0
+        ? ` (${persistentState.orderingCorrectStreak}/3 correct)`
+        : "";
+    feedback.className = "feedback success feedback-tappable";
+    feedback.innerHTML = `Correct!${streakInfo} <span class="continue-hint">${continueHint}.</span>`;
+    feedback.onclick = advanceFromOrdering;
+  } else {
+    feedback.className = "feedback error";
+    const wrongCount = orderingQuestion!.wrongPositions.length;
+    feedback.innerHTML = `
+      ${wrongCount} note${wrongCount > 1 ? "s" : ""} in the wrong position. Try again!
+      <br><button id="retry-ordering-btn" class="play-again-btn" style="margin-top: 0.5rem;">Replay Notes</button>
+    `;
+    const retryBtn = document.getElementById("retry-ordering-btn");
+    if (retryBtn) {
+      retryBtn.addEventListener("click", playOrderingNotes);
+    }
+  }
+}
+
+/** Advance from a correct ordering answer */
+function advanceFromOrdering(): void {
+  clearAutoAdvance();
+
+  // In practice mode, stay in ordering practice
+  if (practiceMode === "ordering") {
+    initOrderingQuestion();
+    renderOrdering();
+    playOrderingNotes();
+    return;
+  }
+
+  // Check if exited ordering mode (3 correct in a row)
+  if (!persistentState.isInOrderingMode) {
+    // Continue to next regular question
+    orderingQuestion = null;
+    nextQuestion();
+  } else {
+    // Stay in ordering mode, new ordering question
+    initOrderingQuestion();
+    renderOrdering();
+    playOrderingNotes();
+  }
+}
+
+/** Setup event listeners for ordering question */
+function setupOrderingEventListeners(): void {
+  // Replay button
+  const replayBtn = document.getElementById("replay-ordering-btn");
+  if (replayBtn) {
+    replayBtn.addEventListener("click", playOrderingNotes);
+  }
+
+  // Confirm button
+  const confirmBtn = document.getElementById("confirm-ordering-btn");
+  if (confirmBtn) {
+    confirmBtn.addEventListener("click", checkOrderingAnswer);
+  }
+
+  // Clear history button
+  const clearBtn = document.getElementById("clear-history-btn");
+  if (clearBtn) {
+    clearBtn.addEventListener("click", handleClearHistory);
+  }
+
+  // Drag-and-drop for available notes
+  const availableNotes = document.querySelectorAll(".ordering-note");
+  availableNotes.forEach((note) => {
+    note.addEventListener("dragstart", (e) => handleDragStart(e as DragEvent));
+    note.addEventListener("dragend", (e) => handleDragEnd(e as DragEvent));
+  });
+
+  // Drag-and-drop for slots (both for placing and swapping)
+  const slots = document.querySelectorAll(".ordering-slot");
+  slots.forEach((slot) => {
+    slot.addEventListener("dragover", (e) => handleDragOver(e as DragEvent));
+    slot.addEventListener("dragleave", (e) => handleDragLeave(e as DragEvent));
+    slot.addEventListener("drop", (e) => handleDrop(e as DragEvent));
+    slot.addEventListener("click", (e) => handleSlotClick(e as MouseEvent));
+
+    // Make filled slots draggable
+    if (slot.classList.contains("filled")) {
+      (slot as HTMLElement).draggable = true;
+      slot.addEventListener("dragstart", (e) => handleDragStart(e as DragEvent));
+      slot.addEventListener("dragend", (e) => handleDragEnd(e as DragEvent));
+    }
+  });
+
+  // Allow dropping back to available pool
+  const availablePool = document.getElementById("available-notes");
+  if (availablePool) {
+    availablePool.addEventListener("dragover", (e) => e.preventDefault());
+    availablePool.addEventListener("drop", (e) => handleDropToPool(e as DragEvent));
+  }
+
+  // Keyboard handler
+  if (keyboardHandler) {
+    document.removeEventListener("keydown", keyboardHandler);
+  }
+
+  keyboardHandler = (e: KeyboardEvent) => {
+    if (e.key === "r" || e.key === "R") {
+      e.preventDefault();
+      playOrderingNotes();
+    } else if (e.key === " " || e.key === "Enter") {
+      e.preventDefault();
+      if (isPlaying) return;
+      if (orderingQuestion?.hasConfirmed && orderingQuestion.wrongPositions.length === 0) {
+        advanceFromOrdering();
+      }
+    }
+  };
+
+  document.addEventListener("keydown", keyboardHandler);
+
+  // Cleanup on navigation
+  if (cleanupHandler) {
+    window.removeEventListener("hashchange", cleanupHandler);
+  }
+
+  cleanupHandler = () => {
+    if (keyboardHandler) {
+      document.removeEventListener("keydown", keyboardHandler);
+      keyboardHandler = null;
+    }
+    clearAutoAdvance();
+    if (cleanupHandler) {
+      window.removeEventListener("hashchange", cleanupHandler);
+      cleanupHandler = null;
+    }
+  };
+  window.addEventListener("hashchange", cleanupHandler);
+}
+
+// ============================================================================
+// Regular Question UI
+// ============================================================================
+
 function render(): void {
   const app = document.getElementById("app")!;
 
@@ -667,8 +1163,17 @@ function render(): void {
     ? `Is this ${question.displayOrder[0]} or ${question.displayOrder[1]}?`
     : `Which was the ${question.targetNote}?`;
 
+  const practiceModeName = practiceMode === "two-note" ? "Two-Note" : "Single-Note";
+  const practiceBanner = practiceMode
+    ? `<div class="practice-mode-banner">
+        <span>Practice Mode: ${practiceModeName}</span>
+        <a href="#/quiz">Exit Practice</a>
+      </div>`
+    : "";
+
   app.innerHTML = `
     <h1>Tone Quiz</h1>
+    ${practiceBanner}
     <p>${description}</p>
     ${isTouch ? "" : `<p class="keyboard-hints"><strong>Keys:</strong> ${keyHints}</p>`}
 
@@ -684,24 +1189,28 @@ function render(): void {
 
       <div id="feedback"></div>
 
+      ${practiceMode ? "" : `
       <div class="stats">
         <span class="stats-label">Recent:</span>
         <span id="score">${recentCorrect} / ${recentHistory.length}</span>
         <span class="stats-label" style="margin-left: 1rem;">Total:</span>
         <span>${totalPlayed}</span>
       </div>
+      `}
 
       <div class="learning-info">
         <span class="stats-label">Learning:</span>
         <span>${vocabDisplay}</span>
-        <a href="#/stats" class="stats-link">View Stats</a>
+        ${practiceMode ? "" : '<a href="#/stats" class="stats-link">View Stats</a>'}
         <a href="#/about" class="stats-link">About</a>
       </div>
 
+      ${practiceMode ? "" : `
       <div class="danger-zone">
         <button class="danger-btn" id="clear-history-btn">Clear History</button>
         <p class="danger-warning">This will reset all your progress</p>
       </div>
+      `}
     </div>
   `;
 
@@ -766,8 +1275,11 @@ function setupEventListeners(): void {
   const playBtn = document.getElementById("play-btn")!;
   playBtn.addEventListener("click", playQuestionNotes);
 
-  const clearBtn = document.getElementById("clear-history-btn")!;
-  clearBtn.addEventListener("click", handleClearHistory);
+  // Clear history button only exists in normal mode
+  const clearBtn = document.getElementById("clear-history-btn");
+  if (clearBtn) {
+    clearBtn.addEventListener("click", handleClearHistory);
+  }
 
   if (keyboardHandler) {
     document.removeEventListener("keydown", keyboardHandler);
@@ -850,6 +1362,13 @@ function handleChoice(chosenIndex: number): void {
 
   // Retry on wrong answer until correct
   shouldRetry = !isCorrect;
+
+  // In practice mode, skip progression (no unlocks, no history recording)
+  if (practiceMode) {
+    renderChoiceButtons();
+    renderFeedback();
+    return;
+  }
 
   // Save previous state to detect note introductions
   const prevState = persistentState;
@@ -998,13 +1517,27 @@ function nextQuestion(): void {
     return;
   }
 
+  // Increment ordering interval for non-ordering questions
+  persistentState = incrementOrderingInterval(persistentState);
+  saveState(persistentState);
+
   const transition = initQuestion();
-  render();
-  if (transition.showModal && transition.modalMessage) {
-    // Show modal first, play notes after it dismisses
-    showModal(transition.modalMessage, playQuestionNotes);
+
+  // Handle ordering vs regular questions
+  if (transition.isOrdering) {
+    renderOrdering();
+    if (transition.showModal && transition.modalMessage) {
+      showModal(transition.modalMessage, playOrderingNotes);
+    } else {
+      playOrderingNotes();
+    }
   } else {
-    playQuestionNotes();
+    render();
+    if (transition.showModal && transition.modalMessage) {
+      showModal(transition.modalMessage, playQuestionNotes);
+    } else {
+      playQuestionNotes();
+    }
   }
 }
 
@@ -1073,13 +1606,92 @@ export function renderToneQuizAbout(): void {
   renderIntroPage(true);
 }
 
+/** Render the practice mode selection page */
+export function renderPracticeSelection(): void {
+  const app = document.getElementById("app")!;
+  const state = loadState();
+  const hasEnoughNotes = state.learningVocabulary.length >= 3;
+
+  app.innerHTML = `
+    <a href="#/quiz" class="back-link">&larr; Back to Quiz</a>
+    <h1>Practice Mode</h1>
+    <p class="intro-subtitle">Practice-only (no unlocks)</p>
+
+    <div class="exercise-container practice-selection">
+      <div class="intro-section">
+        <p>Practice a specific exercise type without affecting your progression. Results here don't count toward unlocks.</p>
+      </div>
+
+      <div class="practice-options">
+        <a href="#/practice/two-note" class="practice-option">
+          <h3>Two-Note Comparison</h3>
+          <p>Two notes play - identify which one is the target note.</p>
+        </a>
+
+        <a href="#/practice/single-note" class="practice-option">
+          <h3>Single-Note Identification</h3>
+          <p>One note plays - identify it from two choices.</p>
+        </a>
+
+        <a href="#/practice/ordering" class="practice-option ${hasEnoughNotes ? "" : "disabled"}">
+          <h3>Note Ordering</h3>
+          <p>All notes play - arrange them in chromatic order.</p>
+          ${hasEnoughNotes ? "" : "<span class='practice-disabled-note'>Requires 3+ notes in vocabulary</span>"}
+        </a>
+      </div>
+
+      <div class="intro-section">
+        <p><small>Tip: Access this page via <code>#/practice</code> in the URL.</small></p>
+      </div>
+    </div>
+  `;
+}
+
+/** Start a practice mode session */
+export function renderPracticeMode(mode: PracticeMode): void {
+  practiceMode = mode;
+  persistentState = loadState();
+  pendingIntroducedNote = null;
+
+  // For ordering, need at least 3 notes
+  if (mode === "ordering" && persistentState.learningVocabulary.length < 3) {
+    window.location.hash = "#/practice";
+    return;
+  }
+
+  const transition = initQuestion();
+
+  if (transition.isOrdering) {
+    renderOrdering();
+    playOrderingNotes();
+  } else {
+    render();
+    playQuestionNotes();
+  }
+}
+
 export function renderToneQuiz(): void {
+  practiceMode = null; // Reset practice mode on quiz entry
   persistentState = loadState();
   pendingIntroducedNote = null; // Reset on page load
-  initQuestion();
+  const transition = initQuestion();
 
-  render();
-  playQuestionNotes();
+  // Handle ordering vs regular questions
+  if (transition.isOrdering) {
+    renderOrdering();
+    if (transition.showModal && transition.modalMessage) {
+      showModal(transition.modalMessage, playOrderingNotes);
+    } else {
+      playOrderingNotes();
+    }
+  } else {
+    render();
+    if (transition.showModal && transition.modalMessage) {
+      showModal(transition.modalMessage, playQuestionNotes);
+    } else {
+      playQuestionNotes();
+    }
+  }
 }
 
 // Clean up handlers on HMR to prevent stale handlers from persisting

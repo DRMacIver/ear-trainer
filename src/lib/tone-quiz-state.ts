@@ -61,6 +61,19 @@ export const NOTE_UNLOCK_COOLDOWN = 20;
 /** Questions per other vocab note when focusing on a new note */
 export const NEW_NOTE_FOCUS_PER_PAIR = 3;
 
+// ============================================================================
+// Ordering Question Constants
+// ============================================================================
+
+/** Questions between ordering questions (when not struggling) */
+export const ORDERING_INTERVAL = 50;
+/** Below this accuracy on last N questions triggers ordering */
+export const ORDERING_STRUGGLE_THRESHOLD = 0.5;
+/** Number of recent questions to check for struggling */
+export const ORDERING_STRUGGLE_WINDOW = 10;
+/** Correct ordering answers in a row to exit ordering mode */
+export const ORDERING_EXIT_STREAK = 3;
+
 /** Unlock order for two-tone variants (octave pairs) */
 export const TWO_TONE_UNLOCK_ORDER = ["4-4", "3-3", "5-5", "3-4", "4-5"] as const;
 /** Unlock order for single-note variants (octaves) */
@@ -136,6 +149,12 @@ export interface ToneQuizState {
   newNoteFocusNote: FullTone | null; // The newly introduced note to focus on
   newNoteFocusRemaining: number; // Questions remaining in focus mode
 
+  // Ordering question state
+  orderingQuestionInterval: number; // Questions since last ordering question
+  orderingCorrectStreak: number; // Consecutive correct ordering answers
+  isInOrderingMode: boolean; // Currently in ordering sticky mode
+  orderingPerformance: boolean[]; // Recent ordering results for stats
+
   // FSRS spaced repetition state
   pairCards: Record<string, TonePairCard>; // "target-other" -> card state
   session: SessionInfo;
@@ -163,6 +182,10 @@ function createInitialState(): ToneQuizState {
     questionsSinceLastUnlock: 0,
     newNoteFocusNote: null,
     newNoteFocusRemaining: 0,
+    orderingQuestionInterval: 0,
+    orderingCorrectStreak: 0,
+    isInOrderingMode: false,
+    orderingPerformance: [],
     pairCards: {},
     session: {
       sessionStartTime: Date.now(),
@@ -1379,5 +1402,100 @@ export function selectOctavesForPair(
   const validPairs = getValidOctavePairs(higherNote, lowerNote);
   if (validPairs.length === 0) return null;
   return validPairs[Math.floor(Math.random() * validPairs.length)];
+}
+
+// ============================================================================
+// Ordering Question Functions
+// ============================================================================
+
+/**
+ * Get vocabulary notes sorted in chromatic order.
+ * Example: If vocab = [C, G, E, A], returns [C, E, G, A]
+ */
+export function getVocabInChromaticOrder(vocab: FullTone[]): FullTone[] {
+  return [...vocab].sort(
+    (a, b) => FULL_TONES.indexOf(a) - FULL_TONES.indexOf(b)
+  );
+}
+
+/**
+ * Check if an ordering question should be triggered.
+ * Triggers when:
+ * 1. Already in ordering mode (sticky until 3 correct)
+ * 2. Interval reached (every 50 questions)
+ * 3. Struggling (< 50% on last 10 questions)
+ */
+export function shouldTriggerOrdering(state: ToneQuizState): boolean {
+  // Need at least 3 notes in vocabulary for ordering to make sense
+  if (state.learningVocabulary.length < 3) return false;
+
+  // Already in ordering mode
+  if (state.isInOrderingMode) return true;
+
+  // Check interval
+  if (state.orderingQuestionInterval >= ORDERING_INTERVAL) return true;
+
+  // Check struggling (< 50% on last 10)
+  const recent = state.history.slice(-ORDERING_STRUGGLE_WINDOW);
+  if (recent.length >= ORDERING_STRUGGLE_WINDOW) {
+    const correct = recent.filter((r) => r.correct).length;
+    if (correct / recent.length < ORDERING_STRUGGLE_THRESHOLD) return true;
+  }
+
+  return false;
+}
+
+/**
+ * Record the result of an ordering question.
+ * Updates ordering mode state and performance tracking.
+ */
+export function recordOrderingResult(
+  state: ToneQuizState,
+  correct: boolean
+): ToneQuizState {
+  let newState = { ...state };
+
+  // Track performance
+  newState.orderingPerformance = [...state.orderingPerformance, correct];
+
+  // Reset interval counter
+  newState.orderingQuestionInterval = 0;
+
+  if (correct) {
+    newState.orderingCorrectStreak = state.orderingCorrectStreak + 1;
+
+    // Exit ordering mode after 3 correct in a row
+    if (newState.orderingCorrectStreak >= ORDERING_EXIT_STREAK) {
+      newState.isInOrderingMode = false;
+      newState.orderingCorrectStreak = 0;
+    }
+  } else {
+    // Reset streak on wrong, stay in ordering mode
+    newState.orderingCorrectStreak = 0;
+    newState.isInOrderingMode = true;
+  }
+
+  return newState;
+}
+
+/**
+ * Enter ordering mode. Called when an ordering question is initiated.
+ */
+export function enterOrderingMode(state: ToneQuizState): ToneQuizState {
+  return {
+    ...state,
+    isInOrderingMode: true,
+  };
+}
+
+/**
+ * Increment the ordering question interval counter.
+ * Called when a non-ordering question is answered.
+ */
+export function incrementOrderingInterval(state: ToneQuizState): ToneQuizState {
+  return {
+    ...state,
+    orderingQuestionInterval: state.orderingQuestionInterval + 1,
+  };
 }
 
