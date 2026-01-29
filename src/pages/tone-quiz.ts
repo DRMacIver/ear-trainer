@@ -88,8 +88,8 @@ const TYPE_STICKINESS = 0.7;
 const NOTE_STICKY_MIN = 3;
 const NOTE_STICKY_MAX = 6;
 
-/** Show a temporary modal overlay indicating the note has changed */
-function showNoteChangeModal(note: FullTone, onDismiss?: () => void): void {
+/** Show a temporary modal overlay with a message */
+function showModal(message: string, onDismiss?: () => void): void {
   // Remove any existing modal
   const existing = document.getElementById("note-change-modal");
   if (existing) existing.remove();
@@ -97,7 +97,7 @@ function showNoteChangeModal(note: FullTone, onDismiss?: () => void): void {
   const modal = document.createElement("div");
   modal.id = "note-change-modal";
   modal.className = "note-change-modal";
-  modal.innerHTML = `<div class="note-change-content">Note change: <strong>${note}</strong></div>`;
+  modal.innerHTML = `<div class="note-change-content">${message}</div>`;
   document.body.appendChild(modal);
 
   // Trigger entrance animation
@@ -113,14 +113,22 @@ function showNoteChangeModal(note: FullTone, onDismiss?: () => void): void {
   }, 1500);
 }
 
-/** Initialize a new question. Returns true if target note changed (for flash). */
-function initQuestion(): boolean {
+type TransitionInfo = {
+  showModal: boolean;
+  modalMessage?: string;
+};
+
+/** Initialize a new question. Returns transition info for modal display. */
+function initQuestion(): TransitionInfo {
+  const prevQuestionType = lastQuestionType;
+
   // Check for a forced variant from accelerated mode
   const [forcedVariant, updatedState] = consumeForcedVariant(persistentState);
   if (forcedVariant) {
     persistentState = updatedState;
     saveState(persistentState);
-    return initQuestionFromVariant(forcedVariant);
+    const isNewTarget = initQuestionFromVariant(forcedVariant);
+    return getTransitionInfo(prevQuestionType, question.questionType, isNewTarget);
   }
 
   // Decide question type based on what's available and stickiness
@@ -150,10 +158,36 @@ function initQuestion(): boolean {
 
   if (questionType === "single-note") {
     initSingleNoteQuestion();
-    return false; // No flash for single-note
+    return getTransitionInfo(prevQuestionType, "single-note", false);
   } else {
-    return initTwoNoteQuestion();
+    const isNewTarget = initTwoNoteQuestion();
+    return getTransitionInfo(prevQuestionType, "two-note", isNewTarget);
   }
+}
+
+/** Determine what modal to show based on question type transition */
+function getTransitionInfo(
+  prevType: QuestionType | null,
+  newType: QuestionType,
+  isNewTarget: boolean
+): TransitionInfo {
+  // Switching to single-note
+  if (newType === "single-note" && prevType !== "single-note") {
+    return { showModal: true, modalMessage: "Single Tones" };
+  }
+
+  // Switching to two-note or target changed within two-note
+  if (newType === "two-note") {
+    if (prevType !== "two-note") {
+      // Switching from single-note to two-note
+      return { showModal: true, modalMessage: `Two Tones: <strong>${question.targetNote}</strong>` };
+    } else if (isNewTarget) {
+      // Staying on two-note but target changed
+      return { showModal: true, modalMessage: `Two Tones: <strong>${question.targetNote}</strong>` };
+    }
+  }
+
+  return { showModal: false };
 }
 
 /** Initialize a question from a specific variant (used by accelerated mode) */
@@ -964,11 +998,11 @@ function nextQuestion(): void {
     return;
   }
 
-  const isNewTarget = initQuestion();
+  const transition = initQuestion();
   render();
-  if (isNewTarget) {
+  if (transition.showModal && transition.modalMessage) {
     // Show modal first, play notes after it dismisses
-    showNoteChangeModal(question.targetNote, playQuestionNotes);
+    showModal(transition.modalMessage, playQuestionNotes);
   } else {
     playQuestionNotes();
   }
