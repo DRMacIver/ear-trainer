@@ -277,16 +277,52 @@ function initTwoNoteQuestion(): boolean {
     throw new Error("No unlocked two-tone variants");
   }
 
-  // Determine the target note (with stickiness)
+  // Check for unplayed variants FIRST - they take priority over stickiness
+  const unplayedVariants = getUnplayedTwoToneVariants(persistentState);
+
   let targetNote: FullTone;
   let isNewTarget = false;
+  let variantsToChooseFrom: string[];
 
-  if (questionsRemainingOnNote > 0 && currentStickyNote !== null) {
-    // Stay on current note
+  if (unplayedVariants.length > 0) {
+    // Prioritize unplayed variants - pick a target note from them
+    const unplayedNotes = new Set<FullTone>();
+    for (const variant of unplayedVariants) {
+      const { pair } = parseVariantKey(variant);
+      const [a, b] = pair.split("-") as [FullTone, FullTone];
+      unplayedNotes.add(a);
+      unplayedNotes.add(b);
+    }
+    const noteArray = Array.from(unplayedNotes);
+    targetNote = noteArray[Math.floor(Math.random() * noteArray.length)];
+
+    // Check if this is a new target
+    isNewTarget = currentStickyNote !== null && targetNote !== currentStickyNote;
+
+    // Update stickiness
+    currentStickyNote = targetNote;
+    questionsRemainingOnNote =
+      NOTE_STICKY_MIN + Math.floor(Math.random() * (NOTE_STICKY_MAX - NOTE_STICKY_MIN + 1)) - 1;
+
+    // Find unplayed variants for this target
+    variantsToChooseFrom = unplayedVariants.filter((v) => {
+      const { pair } = parseVariantKey(v);
+      const [a, b] = pair.split("-") as [FullTone, FullTone];
+      return a === targetNote || b === targetNote;
+    });
+  } else if (questionsRemainingOnNote > 0 && currentStickyNote !== null) {
+    // No unplayed variants - follow normal stickiness
     targetNote = currentStickyNote;
     questionsRemainingOnNote--;
+
+    // Find variants for this target
+    variantsToChooseFrom = unlockedVariants.filter((v) => {
+      const { pair } = parseVariantKey(v);
+      const [a, b] = pair.split("-") as [FullTone, FullTone];
+      return a === targetNote || b === targetNote;
+    });
   } else {
-    // Pick a new target note from all notes in unlocked variants
+    // Pick a new target note
     const availableNotes = new Set<FullTone>();
     for (const variant of unlockedVariants) {
       const { pair } = parseVariantKey(variant);
@@ -302,26 +338,21 @@ function initTwoNoteQuestion(): boolean {
     }
     targetNote = noteArray[Math.floor(Math.random() * noteArray.length)];
 
-    // Always a new target when stickiness expires (unless only one note available)
+    // Always a new target when stickiness expires
     isNewTarget = currentStickyNote !== null && targetNote !== currentStickyNote;
 
     // Set stickiness for 3-6 questions
     currentStickyNote = targetNote;
     questionsRemainingOnNote =
       NOTE_STICKY_MIN + Math.floor(Math.random() * (NOTE_STICKY_MAX - NOTE_STICKY_MIN + 1)) - 1;
+
+    // Find variants for this target
+    variantsToChooseFrom = unlockedVariants.filter((v) => {
+      const { pair } = parseVariantKey(v);
+      const [a, b] = pair.split("-") as [FullTone, FullTone];
+      return a === targetNote || b === targetNote;
+    });
   }
-
-  // Find variants that include the target note
-  const matchingVariants = unlockedVariants.filter((v) => {
-    const { pair } = parseVariantKey(v);
-    const [a, b] = pair.split("-") as [FullTone, FullTone];
-    return a === targetNote || b === targetNote;
-  });
-
-  // Prioritize unplayed variants if any exist for this target
-  const unplayedVariants = getUnplayedTwoToneVariants(persistentState);
-  const unplayedMatching = matchingVariants.filter((v) => unplayedVariants.includes(v));
-  const variantsToChooseFrom = unplayedMatching.length > 0 ? unplayedMatching : matchingVariants;
 
   // Pick a random variant (preferring unplayed)
   const selectedVariant =
