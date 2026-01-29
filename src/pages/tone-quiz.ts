@@ -68,6 +68,7 @@ let persistentState: ToneQuizState;
 let question: QuestionState;
 let introState: IntroductionState | null = null;
 let keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
+let cleanupHandler: (() => void) | null = null; // Track cleanup to prevent stale handlers
 let autoAdvanceTimeout: ReturnType<typeof setTimeout> | null = null;
 let shouldRetry = false; // Whether next advance should retry same question
 let isPlaying = false; // Whether audio is currently playing
@@ -756,15 +757,23 @@ function setupEventListeners(): void {
 
   document.addEventListener("keydown", keyboardHandler);
 
-  const cleanupOnNavigate = () => {
+  // Remove any stale cleanup handler before registering new one
+  if (cleanupHandler) {
+    window.removeEventListener("hashchange", cleanupHandler);
+  }
+
+  cleanupHandler = () => {
     if (keyboardHandler) {
       document.removeEventListener("keydown", keyboardHandler);
       keyboardHandler = null;
     }
     clearAutoAdvance();
-    window.removeEventListener("hashchange", cleanupOnNavigate);
+    if (cleanupHandler) {
+      window.removeEventListener("hashchange", cleanupHandler);
+      cleanupHandler = null;
+    }
   };
-  window.addEventListener("hashchange", cleanupOnNavigate);
+  window.addEventListener("hashchange", cleanupHandler);
 }
 
 function advanceToNext(): void {
@@ -1041,6 +1050,10 @@ if (import.meta.hot) {
     if (keyboardHandler) {
       document.removeEventListener("keydown", keyboardHandler);
       keyboardHandler = null;
+    }
+    if (cleanupHandler) {
+      window.removeEventListener("hashchange", cleanupHandler);
+      cleanupHandler = null;
     }
     clearAutoAdvance();
   });
