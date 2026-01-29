@@ -22,11 +22,7 @@ import {
   isInNewNoteFocusMode,
   startNewNoteFocus,
   consumeNewNoteFocusQuestion,
-  shouldTriggerOrdering,
   getVocabInChromaticOrder,
-  recordOrderingResult,
-  enterOrderingMode,
-  incrementOrderingInterval,
   AVAILABLE_OCTAVES,
   ToneQuizState,
   FullTone,
@@ -176,9 +172,6 @@ function initOrderingQuestion(): void {
     attemptCount: 0,
   };
 
-  // Enter ordering mode
-  persistentState = enterOrderingMode(persistentState);
-  saveState(persistentState);
 }
 
 /** Initialize a new question. Returns transition info for modal display. */
@@ -189,12 +182,6 @@ function initQuestion(): TransitionInfo {
   if (practiceMode === "ordering") {
     initOrderingQuestion();
     return { showModal: false, isOrdering: true };
-  }
-
-  // Check for ordering question trigger first (only in normal mode)
-  if (!practiceMode && shouldTriggerOrdering(persistentState)) {
-    initOrderingQuestion();
-    return { showModal: true, modalMessage: "Name That Sequence", isOrdering: true };
   }
 
   // Clear any previous ordering state
@@ -989,12 +976,6 @@ function checkOrderingAnswer(): void {
 
   const isCorrect = wrong.length === 0;
 
-  // In practice mode, skip state recording
-  if (!practiceMode) {
-    persistentState = recordOrderingResult(persistentState, isCorrect);
-    saveState(persistentState);
-  }
-
   renderOrdering();
   renderOrderingFeedback(isCorrect);
 }
@@ -1006,13 +987,8 @@ function renderOrderingFeedback(isCorrect: boolean): void {
   const continueHint = isTouch ? "Tap to continue" : "Press Space to continue";
 
   if (isCorrect) {
-    // Show streak info only in normal mode
-    const streakInfo =
-      !practiceMode && persistentState.orderingCorrectStreak > 0
-        ? ` (${persistentState.orderingCorrectStreak}/3 correct)`
-        : "";
     feedback.className = "feedback success feedback-tappable";
-    feedback.innerHTML = `Correct!${streakInfo} <span class="continue-hint">${continueHint}.</span>`;
+    feedback.innerHTML = `Correct! <span class="continue-hint">${continueHint}.</span>`;
     feedback.onclick = advanceFromOrdering;
   } else {
     feedback.className = "feedback error";
@@ -1031,26 +1007,9 @@ function renderOrderingFeedback(isCorrect: boolean): void {
 /** Advance from a correct ordering answer */
 function advanceFromOrdering(): void {
   clearAutoAdvance();
-
-  // In practice mode, stay in ordering practice
-  if (practiceMode === "ordering") {
-    initOrderingQuestion();
-    renderOrdering();
-    playOrderingNotes();
-    return;
-  }
-
-  // Check if exited ordering mode (3 correct in a row)
-  if (!persistentState.isInOrderingMode) {
-    // Continue to next regular question
-    orderingQuestion = null;
-    nextQuestion();
-  } else {
-    // Stay in ordering mode, new ordering question
-    initOrderingQuestion();
-    renderOrdering();
-    playOrderingNotes();
-  }
+  initOrderingQuestion();
+  renderOrdering();
+  playOrderingNotes();
 }
 
 /** Setup event listeners for ordering question */
@@ -1520,27 +1479,13 @@ function nextQuestion(): void {
     return;
   }
 
-  // Increment ordering interval for non-ordering questions
-  persistentState = incrementOrderingInterval(persistentState);
-  saveState(persistentState);
-
   const transition = initQuestion();
 
-  // Handle ordering vs regular questions
-  if (transition.isOrdering) {
-    renderOrdering();
-    if (transition.showModal && transition.modalMessage) {
-      showModal(transition.modalMessage, playOrderingNotes);
-    } else {
-      playOrderingNotes();
-    }
+  render();
+  if (transition.showModal && transition.modalMessage) {
+    showModal(transition.modalMessage, playQuestionNotes);
   } else {
-    render();
-    if (transition.showModal && transition.modalMessage) {
-      showModal(transition.modalMessage, playQuestionNotes);
-    } else {
-      playQuestionNotes();
-    }
+    playQuestionNotes();
   }
 }
 
@@ -1679,21 +1624,11 @@ export function renderToneQuiz(): void {
   pendingIntroducedNote = null; // Reset on page load
   const transition = initQuestion();
 
-  // Handle ordering vs regular questions
-  if (transition.isOrdering) {
-    renderOrdering();
-    if (transition.showModal && transition.modalMessage) {
-      showModal(transition.modalMessage, playOrderingNotes);
-    } else {
-      playOrderingNotes();
-    }
+  render();
+  if (transition.showModal && transition.modalMessage) {
+    showModal(transition.modalMessage, playQuestionNotes);
   } else {
-    render();
-    if (transition.showModal && transition.modalMessage) {
-      showModal(transition.modalMessage, playQuestionNotes);
-    } else {
-      playQuestionNotes();
-    }
+    playQuestionNotes();
   }
 }
 
