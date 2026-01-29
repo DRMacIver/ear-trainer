@@ -19,6 +19,7 @@ import {
   getUnplayedSingleNoteVariants,
   parseVariantKey,
   consumeForcedVariant,
+  isInNewNoteFocusMode,
   startNewNoteFocus,
   consumeNewNoteFocusQuestion,
   ToneQuizState,
@@ -128,7 +129,10 @@ function initQuestion(): boolean {
 
   let questionType: QuestionType;
 
-  if (singleNoteVariants.length === 0) {
+  // Force two-note when in new note focus mode
+  if (isInNewNoteFocusMode(persistentState)) {
+    questionType = "two-note";
+  } else if (singleNoteVariants.length === 0) {
     // Only two-tone available
     questionType = "two-note";
   } else if (twoToneVariants.length === 0) {
