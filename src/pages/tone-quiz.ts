@@ -970,21 +970,7 @@ export function renderToneQuizAbout(): void {
 
 export function renderToneQuiz(): void {
   persistentState = loadState();
-
-  // Reset module-level state to ensure clean start
-  pendingIntroducedNote = null;
-  currentStickyNote = null;
-  questionsRemainingOnNote = 0;
-  lastQuestionType = null;
-  shouldRetry = false;
-  isPlaying = false;
-
-  // Clear any forced variant from previous session to avoid stale state
-  if (persistentState.forcedNextVariant) {
-    persistentState = { ...persistentState, forcedNextVariant: null };
-    saveState(persistentState);
-  }
-
+  pendingIntroducedNote = null; // Reset on page load
   initQuestion();
 
   render();
