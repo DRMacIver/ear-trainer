@@ -168,8 +168,18 @@ export function loadState(): ToneQuizState {
   if (!stored) {
     return createInitialState();
   }
-  const parsed = JSON.parse(stored) as ToneQuizState;
-  return parsed;
+  const parsed = JSON.parse(stored) as Partial<ToneQuizState>;
+
+  // Migrate old state: ensure all required fields exist
+  const initial = createInitialState();
+  return {
+    ...initial,
+    ...parsed,
+    // Ensure these objects are never undefined
+    pairStreaks: parsed.pairStreaks ?? {},
+    playedVariants: parsed.playedVariants ?? [],
+    unlockedVariants: parsed.unlockedVariants ?? initial.unlockedVariants,
+  };
 }
 
 export function saveState(state: ToneQuizState): void {
@@ -446,13 +456,14 @@ export function recordVariantResult(
   correct: boolean
 ): ToneQuizState {
   const { pair } = parseVariantKey(variantKey);
+  const pairStreaks = state.pairStreaks ?? {};
   let newState = { ...state };
 
   if (correct) {
     // Increment pair streak (across any octave combination)
-    const currentStreak = state.pairStreaks[pair] ?? 0;
+    const currentStreak = pairStreaks[pair] ?? 0;
     const newStreak = currentStreak + 1;
-    newState.pairStreaks = { ...state.pairStreaks, [pair]: newStreak };
+    newState.pairStreaks = { ...pairStreaks, [pair]: newStreak };
 
     // Check for completion (4 in a row for the pair)
     if (newStreak >= PAIR_COMPLETION_STREAK) {
@@ -460,12 +471,12 @@ export function recordVariantResult(
       if (nextVariant && !isVariantUnlocked(newState, nextVariant)) {
         newState.unlockedVariants = [...newState.unlockedVariants, nextVariant];
         // Reset pair streak so it doesn't keep triggering
-        newState.pairStreaks = { ...newState.pairStreaks, [pair]: 0 };
+        newState.pairStreaks = { ...(newState.pairStreaks ?? {}), [pair]: 0 };
       }
     }
   } else {
     // Reset pair streak on wrong answer
-    newState.pairStreaks = { ...state.pairStreaks, [pair]: 0 };
+    newState.pairStreaks = { ...pairStreaks, [pair]: 0 };
   }
 
   return newState;
