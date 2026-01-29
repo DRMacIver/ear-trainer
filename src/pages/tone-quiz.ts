@@ -79,7 +79,7 @@ interface QuestionState {
 interface OrderingQuestionState {
   questionType: "ordering";
   notesPlayed: { note: FullTone; octave: number }[]; // Notes in play order
-  correctOrder: FullTone[]; // Chromatic order
+  correctOrder: FullTone[]; // Correct answer = play order (which note was 1st, 2nd, etc.)
   userOrder: (FullTone | null)[]; // User's current arrangement
   hasConfirmed: boolean;
   wrongPositions: number[]; // Indices of incorrect positions after confirm
@@ -154,15 +154,17 @@ type TransitionInfo = {
 /** Initialize an ordering question */
 function initOrderingQuestion(): void {
   const vocab = persistentState.learningVocabulary;
-  const correctOrder = getVocabInChromaticOrder(vocab);
 
-  // Create notes in random order with random octaves
+  // Notes are played in a random order with random octaves
   const notesPlayed = shuffleArray(
     vocab.map((note) => ({
       note,
       octave: AVAILABLE_OCTAVES[Math.floor(Math.random() * AVAILABLE_OCTAVES.length)],
     }))
   );
+
+  // The correct answer is the play order - user must identify which note was played when
+  const correctOrder = notesPlayed.map((n) => n.note);
 
   orderingQuestion = {
     questionType: "ordering",
@@ -192,7 +194,7 @@ function initQuestion(): TransitionInfo {
   // Check for ordering question trigger first (only in normal mode)
   if (!practiceMode && shouldTriggerOrdering(persistentState)) {
     initOrderingQuestion();
-    return { showModal: true, modalMessage: "Order the Notes", isOrdering: true };
+    return { showModal: true, modalMessage: "Name That Sequence", isOrdering: true };
   }
 
   // Clear any previous ordering state
@@ -763,9 +765,10 @@ function renderOrdering(): void {
   const recentCorrect = recentHistory.filter((r) => r.correct).length;
   const totalPlayed = persistentState.history.length;
 
-  // Get notes that are placed and available
+  // Get notes that are placed and available (show vocab in chromatic order, not play order)
   const placedNotes = new Set(orderingQuestion.userOrder.filter((n): n is FullTone => n !== null));
-  const availableNotes = orderingQuestion.correctOrder.filter((n) => !placedNotes.has(n));
+  const vocabChromaticOrder = getVocabInChromaticOrder(persistentState.learningVocabulary);
+  const availableNotes = vocabChromaticOrder.filter((n) => !placedNotes.has(n));
 
   // Position labels
   const positionLabels = ["1st", "2nd", "3rd", "4th", "5th", "6th", "7th"];
@@ -780,7 +783,7 @@ function renderOrdering(): void {
   app.innerHTML = `
     <h1>Tone Quiz</h1>
     ${practiceBanner}
-    <p>Drag the notes into chromatic order (lowest to highest).</p>
+    <p>Identify the notes in the order they were played.</p>
     ${isTouch ? "" : `<p class="keyboard-hints"><strong>Keys:</strong> <kbd>R</kbd> Replay All</p>`}
 
     <div class="exercise-container">
@@ -789,7 +792,7 @@ function renderOrdering(): void {
       </div>
 
       <div class="ordering-section">
-        <h3>Arrange in order:</h3>
+        <h3>What was played?</h3>
         <div class="ordering-drop-zones" id="drop-zones">
           ${orderingQuestion.correctOrder
             .map((_, i) => {
@@ -1635,7 +1638,7 @@ export function renderPracticeSelection(): void {
 
         <a href="#/practice/ordering" class="practice-option ${hasEnoughNotes ? "" : "disabled"}">
           <h3>Note Ordering</h3>
-          <p>All notes play - arrange them in chromatic order.</p>
+          <p>All vocab notes play in sequence - identify each note in the order played.</p>
           ${hasEnoughNotes ? "" : "<span class='practice-disabled-note'>Requires 3+ notes in vocabulary</span>"}
         </a>
       </div>
